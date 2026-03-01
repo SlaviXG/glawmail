@@ -70,7 +70,7 @@ func main() {
 	}
 	logger.Printf("Bot verified: @%s (ID: %d)", me.Username, me.ID)
 
-	gmailSvc, err = gmail.NewService(cfg.GmailTokenFile, cfg.GmailFrom)
+	gmailSvc, err = gmail.NewService(cfg.GmailCredentialsFile, cfg.GmailTokenFile, cfg.GmailFrom)
 	if err != nil {
 		log.Fatalf("Failed to initialize Gmail: %v", err)
 	}

@@ -29,8 +29,19 @@ type Service struct {
 	fromAddr string
 }
 
-// NewService creates a Gmail service from a token file.
-func NewService(tokenFile, fromAddr string) (*Service, error) {
+// NewService creates a Gmail service from credentials and token files.
+func NewService(credentialsFile, tokenFile, fromAddr string) (*Service, error) {
+	// Load OAuth config from credentials file (needed for token refresh)
+	credData, err := os.ReadFile(credentialsFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading credentials file: %w", err)
+	}
+	config, err := google.ConfigFromJSON(credData, scopes...)
+	if err != nil {
+		return nil, fmt.Errorf("parsing credentials: %w", err)
+	}
+
+	// Load existing token
 	tokenData, err := os.ReadFile(tokenFile)
 	if err != nil {
 		return nil, fmt.Errorf("reading token file: %w", err)
@@ -42,10 +53,6 @@ func NewService(tokenFile, fromAddr string) (*Service, error) {
 	}
 
 	// Create a token source that can refresh
-	config := &oauth2.Config{
-		Scopes:   scopes,
-		Endpoint: google.Endpoint,
-	}
 	tokenSource := config.TokenSource(context.Background(), &token)
 
 	// Get a fresh token (this will refresh if needed)
