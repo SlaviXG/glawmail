@@ -18,32 +18,37 @@ Email body text here...
 git clone https://github.com/SlaviXG/glawmail
 cd glawmail
 go run ./setup
-go run ./cmd/glawmail
+```
+
+## Install as Service (Linux/Pi)
+
+```bash
+# Build and install
+./glawmail.sh install
+
+# Manage
+glawmail up       # start
+glawmail down     # stop
+glawmail status   # check status
+glawmail logs     # view logs
+```
+
+Add to your shell profile for the `glawmail` command:
+```bash
+echo 'alias glawmail="~/glawmail/glawmail.sh"' >> ~/.bashrc
+source ~/.bashrc
 ```
 
 ## AI Skill
 
-Any AI can generate emails. Example prompt:
+Any AI can generate emails:
 
 ```
-When sending an email, format it as:
-
 GLAWMAIL
 To: recipient@example.com
 Subject: Subject here
 Body:
 Your message here...
-
-The user will forward this to their Gmail bot.
-```
-
-## Building
-
-```bash
-go build -o glawmail ./cmd/glawmail
-
-# Raspberry Pi
-GOOS=linux GOARCH=arm64 go build -o glawmail-pi ./cmd/glawmail
 ```
 
 ## License

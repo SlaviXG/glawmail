@@ -1,0 +1,14 @@
+[Unit]
+Description=GlawMail - Gmail sender bot for Telegram
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/glawmail
+ExecStart=/home/pi/glawmail/glawmail
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
