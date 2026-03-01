@@ -4,9 +4,6 @@ token.json
 credentials.json
 .pairing
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-venv/
+# Go binaries
+glawmail-*
+*.exe
