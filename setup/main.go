@@ -13,6 +13,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -136,6 +138,103 @@ func loadExisting() map[string]string {
 	return existing
 }
 
+func getWorkingDir() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return dir
+}
+
+func setupGlobalAlias() {
+	fmt.Println()
+	if !promptYN("Add global 'glawmail' command?", true) {
+		return
+	}
+
+	workDir := getWorkingDir()
+
+	if runtime.GOOS == "windows" {
+		setupWindowsAlias(workDir)
+	} else {
+		setupUnixAlias(workDir)
+	}
+}
+
+func setupWindowsAlias(workDir string) {
+	// Create glawmail.cmd in a common location
+	userProfile := os.Getenv("USERPROFILE")
+	binDir := filepath.Join(userProfile, "bin")
+
+	// Create bin directory if it doesn't exist
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		color.Err(fmt.Sprintf("Could not create %s: %v", binDir, err))
+		return
+	}
+
+	// Create wrapper script
+	cmdPath := filepath.Join(binDir, "glawmail.cmd")
+	scriptContent := fmt.Sprintf("@echo off\r\n\"%s\\glawmail.bat\" %%*\r\n", workDir)
+	if err := os.WriteFile(cmdPath, []byte(scriptContent), 0755); err != nil {
+		color.Err(fmt.Sprintf("Could not create %s: %v", cmdPath, err))
+		return
+	}
+
+	// Check if bin dir is in PATH
+	pathEnv := os.Getenv("PATH")
+	if !strings.Contains(strings.ToLower(pathEnv), strings.ToLower(binDir)) {
+		// Add to user PATH
+		cmd := exec.Command("setx", "PATH", pathEnv+";"+binDir)
+		if err := cmd.Run(); err != nil {
+			color.Warn(fmt.Sprintf("Created %s but could not add to PATH.", cmdPath))
+			color.Info(fmt.Sprintf("Add %s to your PATH manually, or run:", binDir))
+			fmt.Printf("  setx PATH \"%%PATH%%;%s\"\n", binDir)
+			return
+		}
+		color.Ok("Added 'glawmail' command. Restart your terminal to use it.")
+	} else {
+		color.Ok("Added 'glawmail' command.")
+	}
+}
+
+func setupUnixAlias(workDir string) {
+	home := os.Getenv("HOME")
+	scriptPath := filepath.Join(workDir, "glawmail.sh")
+	aliasLine := fmt.Sprintf("\nalias glawmail='%s'\n", scriptPath)
+
+	// Detect shell config file
+	shell := os.Getenv("SHELL")
+	var rcFile string
+	if strings.Contains(shell, "zsh") {
+		rcFile = filepath.Join(home, ".zshrc")
+	} else {
+		rcFile = filepath.Join(home, ".bashrc")
+	}
+
+	// Check if alias already exists
+	content, _ := os.ReadFile(rcFile)
+	if strings.Contains(string(content), "alias glawmail=") {
+		color.Info("Alias already exists in " + rcFile)
+		return
+	}
+
+	// Append alias
+	f, err := os.OpenFile(rcFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		color.Err(fmt.Sprintf("Could not open %s: %v", rcFile, err))
+		return
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(aliasLine); err != nil {
+		color.Err(fmt.Sprintf("Could not write to %s: %v", rcFile, err))
+		return
+	}
+
+	color.Ok(fmt.Sprintf("Added alias to %s", rcFile))
+	color.Info("Run: source " + rcFile)
+}
+
 func main() {
 	flag.Parse()
 
@@ -236,17 +335,24 @@ func main() {
 	}
 
 	values := map[string]string{
-		"BOT_TOKEN":             botToken,
-		"OWNER_CHAT_ID":         ownerChatID,
-		"GMAIL_FROM":            gmailFrom,
+		"BOT_TOKEN":              botToken,
+		"OWNER_CHAT_ID":          ownerChatID,
+		"GMAIL_FROM":             gmailFrom,
 		"GMAIL_CREDENTIALS_FILE": credPath,
-		"GMAIL_TOKEN_FILE":      tokenPath,
+		"GMAIL_TOKEN_FILE":       tokenPath,
 	}
 	if err := config.Write(".env", values); err != nil {
 		color.Err(fmt.Sprintf("Could not write .env: %v", err))
 		os.Exit(1)
 	}
+
+	// Ask about global alias
+	setupGlobalAlias()
+
 	fmt.Println()
-	color.Ok("Setup complete! Start with:")
-	fmt.Printf("  %s\n", color.Bold("go run ./cmd/glawmail"))
+	color.Ok("Setup complete!")
+	fmt.Println()
+	fmt.Println("Next steps:")
+	fmt.Printf("  %s\n", color.Bold("glawmail install"))
+	fmt.Printf("  %s\n", color.Bold("glawmail up"))
 }
