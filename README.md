@@ -1,8 +1,8 @@
-# Glawmail
+# GlawMail - Email Approval Bot
 
 Human-in-the-loop email approval system. An AI bot generates emails on Machine A, sends them to Machine B for human approval via Telegram, and Machine B sends approved emails via Gmail.
 
-**Zero shared networking** — Telegram is the only transport between machines.
+**Zero shared networking** - Telegram is the only transport between machines.
 
 ## Architecture
 
@@ -25,10 +25,10 @@ Human-in-the-loop email approval system. An AI bot generates emails on Machine A
 
 ## Security
 
-- **HMAC-SHA256 signed messages** — All operational messages are cryptographically signed
-- **One-time pairing** — 6-digit code handshake locks machines together on first run
-- **Isolated credentials** — Machine A has no Gmail access; Machine B has no AI access
-- **No public endpoints** — Both bots poll Telegram, no webhooks needed
+- **HMAC-SHA256 signed messages** - All operational messages are cryptographically signed
+- **One-time pairing** - 6-digit code handshake locks machines together on first run
+- **Isolated credentials** - Machine A has no Gmail access; Machine B has no AI access
+- **No public endpoints** - Both bots poll Telegram, no webhooks needed
 
 ## Quick Start
 
