@@ -1,8 +1,15 @@
 // Machine B - Gmail Sender Bot
 //
-// Receives GLAWMAIL_SEND messages from the owner (forwarded from Machine A or AI).
-// If the message format is valid and HMAC verifies, sends via Gmail automatically.
-// Responds with success or error.
+// Receives email messages in a simple human-readable format.
+// If the format is valid, sends via Gmail automatically.
+//
+// Format:
+//
+//	GLAWMAIL
+//	To: recipient@example.com
+//	Subject: Email subject
+//	Body:
+//	Email body text here...
 //
 // First run:
 //
@@ -11,17 +18,16 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/SlaviXG/glawmail/internal/config"
 	"github.com/SlaviXG/glawmail/internal/gmail"
-	glawhmac "github.com/SlaviXG/glawmail/internal/hmac"
 	"github.com/SlaviXG/glawmail/internal/telegram"
 )
 
@@ -32,16 +38,6 @@ var (
 	logger      = log.New(os.Stdout, "", log.LstdFlags)
 	ownerChatID int64
 )
-
-// EmailRequest represents the email send request format.
-// This is the interface shared between Machine A and Machine B.
-type EmailRequest struct {
-	To       string            `json:"to"`
-	Subject  string            `json:"subject"`
-	Body     string            `json:"body"`
-	HTML     bool              `json:"html,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
-}
 
 func main() {
 	var err error
@@ -69,9 +65,7 @@ func main() {
 	logger.Println("Gmail service initialized")
 
 	logger.Println("GlawMail sender ready.")
-	bot.SendMessage(ownerChatID,
-		"GlawMail sender started.\n\n"+
-			"Forward GLAWMAIL_SEND messages to send emails.")
+	bot.SendMessage(ownerChatID, "GlawMail sender started.\n\nForward emails in this format:\n\nGLAWMAIL\nTo: email@example.com\nSubject: Subject here\nBody:\nYour message...")
 
 	logger.Println("Polling Telegram...")
 	pollUpdates()
@@ -100,59 +94,22 @@ func pollUpdates() {
 }
 
 func handleMessage(msg *telegram.Message) {
-	text := msg.Text
+	text := strings.TrimSpace(msg.Text)
 
-	// Process GLAWMAIL_SEND messages
-	if strings.HasPrefix(text, "GLAWMAIL_SEND:") {
-		processSendRequest(text)
-	}
-}
-
-func processSendRequest(text string) {
-	// Format: GLAWMAIL_SEND:<HMAC>:<JSON>
-	parts := strings.SplitN(text, ":", 3)
-	if len(parts) != 3 {
-		bot.SendMessage(ownerChatID, "Invalid format. Expected: GLAWMAIL_SEND:<hmac>:<json>")
-		logger.Println("Invalid GLAWMAIL_SEND format - wrong number of parts")
+	// Check for GLAWMAIL prefix (case insensitive)
+	if !strings.HasPrefix(strings.ToUpper(text), "GLAWMAIL") {
 		return
 	}
 
-	sig, payloadStr := parts[1], parts[2]
-
-	// Verify HMAC
-	if !glawhmac.Verify(cfg.WebhookSecret, payloadStr, sig) {
-		bot.SendMessage(ownerChatID, "HMAC verification failed. Message rejected.")
-		logger.Println("GLAWMAIL_SEND failed HMAC verification")
-		return
-	}
-
-	// Parse JSON
-	var req EmailRequest
-	if err := json.Unmarshal([]byte(payloadStr), &req); err != nil {
-		bot.SendMessage(ownerChatID, fmt.Sprintf("Invalid JSON: %v", err))
-		logger.Printf("GLAWMAIL_SEND JSON parse error: %v", err)
-		return
-	}
-
-	// Validate required fields
-	if req.To == "" {
-		bot.SendMessage(ownerChatID, "Missing required field: to")
-		logger.Println("GLAWMAIL_SEND missing 'to' field")
-		return
-	}
-	if req.Subject == "" {
-		bot.SendMessage(ownerChatID, "Missing required field: subject")
-		logger.Println("GLAWMAIL_SEND missing 'subject' field")
-		return
-	}
-	if req.Body == "" {
-		bot.SendMessage(ownerChatID, "Missing required field: body")
-		logger.Println("GLAWMAIL_SEND missing 'body' field")
+	email, err := parseEmail(text)
+	if err != nil {
+		bot.SendMessage(ownerChatID, fmt.Sprintf("Parse error: %v", err))
+		logger.Printf("Parse error: %v", err)
 		return
 	}
 
 	// Send email
-	gmailID, err := gmailSvc.SendEmail(req.To, req.Subject, req.Body, req.HTML)
+	gmailID, err := gmailSvc.SendEmail(email.To, email.Subject, email.Body, false)
 	if err != nil {
 		bot.SendMessage(ownerChatID, fmt.Sprintf("Gmail error: %v", err))
 		logger.Printf("Gmail send error: %v", err)
@@ -160,6 +117,82 @@ func processSendRequest(text string) {
 	}
 
 	// Success
-	bot.SendMessage(ownerChatID, fmt.Sprintf("Sent to %s", req.To))
-	logger.Printf("Email sent to %s (gmail_id=%s)", req.To, gmailID)
+	bot.SendMessage(ownerChatID, fmt.Sprintf("Sent to %s", email.To))
+	logger.Printf("Email sent to %s (gmail_id=%s)", email.To, gmailID)
+}
+
+type Email struct {
+	To      string
+	Subject string
+	Body    string
+}
+
+var emailRegex = regexp.MustCompile(`(?i)^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$`)
+
+func parseEmail(text string) (*Email, error) {
+	lines := strings.Split(text, "\n")
+
+	var to, subject, body string
+	var inBody bool
+
+	for i, line := range lines {
+		// Skip the GLAWMAIL header line
+		if i == 0 && strings.HasPrefix(strings.ToUpper(strings.TrimSpace(line)), "GLAWMAIL") {
+			continue
+		}
+
+		trimmed := strings.TrimSpace(line)
+
+		if inBody {
+			if body != "" {
+				body += "\n"
+			}
+			body += line
+			continue
+		}
+
+		// Parse To:
+		if strings.HasPrefix(strings.ToLower(trimmed), "to:") {
+			to = strings.TrimSpace(strings.TrimPrefix(trimmed, trimmed[:3]))
+			continue
+		}
+
+		// Parse Subject:
+		if strings.HasPrefix(strings.ToLower(trimmed), "subject:") {
+			subject = strings.TrimSpace(strings.TrimPrefix(trimmed, trimmed[:8]))
+			continue
+		}
+
+		// Parse Body:
+		if strings.HasPrefix(strings.ToLower(trimmed), "body:") {
+			inBody = true
+			// Check if body starts on same line
+			rest := strings.TrimSpace(strings.TrimPrefix(trimmed, trimmed[:5]))
+			if rest != "" {
+				body = rest
+			}
+			continue
+		}
+	}
+
+	// Validate
+	to = strings.TrimSpace(to)
+	if to == "" {
+		return nil, fmt.Errorf("missing To: field")
+	}
+	if !emailRegex.MatchString(to) {
+		return nil, fmt.Errorf("invalid email: %s", to)
+	}
+
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return nil, fmt.Errorf("missing Subject: field")
+	}
+
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return nil, fmt.Errorf("missing Body: field")
+	}
+
+	return &Email{To: to, Subject: subject, Body: body}, nil
 }

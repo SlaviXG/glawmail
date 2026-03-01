@@ -8,7 +8,6 @@ package main
 
 import (
 	"bufio"
-	"crypto/rand"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -123,33 +122,22 @@ func tgSendMessage(token, chatID, text string) error {
 	return nil
 }
 
-// -- Secret generation --------------------------------------------------------
-
-func generateSecret() string {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		// Should never happen
-		panic("crypto/rand unavailable: " + err.Error())
-	}
-	return fmt.Sprintf("%x", buf)
-}
-
 // -- Machine A setup ----------------------------------------------------------
 
 func setupMachineA() {
-	color.Heading("Machine A - OpenClaw AI Bot Setup")
-	fmt.Println("Machine A runs your AI bot. It sends approval requests to the owner,")
-	fmt.Println("who forwards them to Machine B. Responses come back the same way.")
+	color.Heading("Machine A - Email Preview Bot Setup (Optional)")
+	fmt.Println("Machine A generates email previews in GLAWMAIL format.")
+	fmt.Println("You can skip this if your AI generates GLAWMAIL messages directly.")
 	fmt.Println()
 
 	existing := loadExisting()
 
 	// Own bot token
-	color.Heading("Step 1 / 3 - OpenClaw Bot Token")
+	color.Heading("Step 1 / 2 - Bot Token")
 	color.Info("Create this bot via @BotFather (/newbot) if you haven't already.")
 	var ownToken, botUsername string
 	for {
-		ownToken = prompt("OpenClaw bot token", existing["OWN_BOT_TOKEN"], true)
+		ownToken = prompt("Bot token", existing["OWN_BOT_TOKEN"], true)
 		if !botTokenRe.MatchString(ownToken) {
 			color.Warn("Expected format: 123456789:ABCdef...")
 			continue
@@ -166,7 +154,7 @@ func setupMachineA() {
 	}
 
 	// Owner chat ID
-	color.Heading("Step 2 / 3 - Your Telegram Chat ID")
+	color.Heading("Step 2 / 2 - Your Telegram Chat ID")
 	color.Info("Get your chat ID from @userinfobot on Telegram.")
 	var ownerChatID string
 	for {
@@ -176,7 +164,7 @@ func setupMachineA() {
 			continue
 		}
 		color.Info("Sending test message...")
-		if err := tgSendMessage(ownToken, ownerChatID, "GlawMail setup: OpenClaw bot connected successfully!"); err != nil {
+		if err := tgSendMessage(ownToken, ownerChatID, "GlawMail setup: Preview bot connected!"); err != nil {
 			color.Err(fmt.Sprintf("Could not send: %v", err))
 			color.Warn("Make sure you have sent /start to @" + botUsername + " first.")
 			continue
@@ -185,34 +173,17 @@ func setupMachineA() {
 		break
 	}
 
-	// Shared secret
-	color.Heading("Step 3 / 3 - Shared HMAC Secret")
-	webhookSecret := existing["WEBHOOK_SECRET"]
-	if webhookSecret != "" {
-		color.Info("Existing WEBHOOK_SECRET found.")
-		if !promptYN("Keep existing WEBHOOK_SECRET?", true) {
-			webhookSecret = generateSecret()
-		}
-	} else {
-		webhookSecret = generateSecret()
-	}
-
-	fmt.Printf("\n  WEBHOOK_SECRET: %s\n\n", color.Bold(webhookSecret))
-	color.Warn("Copy this exact value to Machine B's WEBHOOK_SECRET in its .env file.")
-	prompt("Press Enter once you have noted it", " ", false)
-
 	values := map[string]string{
-		"OWN_BOT_TOKEN":  ownToken,
-		"OWNER_CHAT_ID":  ownerChatID,
-		"WEBHOOK_SECRET": webhookSecret,
+		"OWN_BOT_TOKEN": ownToken,
+		"OWNER_CHAT_ID": ownerChatID,
 	}
 	if err := config.Write(".env", values); err != nil {
 		color.Err(fmt.Sprintf("Could not write .env: %v", err))
 		os.Exit(1)
 	}
 	fmt.Println()
-	color.Ok("Machine A setup complete. Start with:")
-	fmt.Printf("  %s\n", color.Bold("glawmail-a"))
+	color.Ok("Setup complete. Start with:")
+	fmt.Printf("  %s\n", color.Bold("go run ./cmd/machine_a"))
 }
 
 // -- Machine B setup ----------------------------------------------------------
@@ -311,20 +282,9 @@ func setupMachineB() {
 		color.Ok(fmt.Sprintf("Gmail token saved to %s", tokenPath))
 	}
 
-	// Generate HMAC secret
-	webhookSecret := existing["WEBHOOK_SECRET"]
-	if webhookSecret == "" {
-		webhookSecret = generateSecret()
-	}
-
-	fmt.Printf("\n  WEBHOOK_SECRET: %s\n\n", color.Bold(webhookSecret))
-	color.Warn("Save this secret - you'll need it to generate valid GLAWMAIL_SEND messages.")
-	prompt("Press Enter to continue", " ", false)
-
 	values := map[string]string{
 		"OWN_BOT_TOKEN":          ownToken,
 		"OWNER_CHAT_ID":          ownerChatID,
-		"WEBHOOK_SECRET":         webhookSecret,
 		"GMAIL_FROM":             gmailFrom,
 		"GMAIL_CREDENTIALS_FILE": credPath,
 		"GMAIL_TOKEN_FILE":       tokenPath,
