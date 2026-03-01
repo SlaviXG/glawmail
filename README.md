@@ -27,34 +27,27 @@ go run ./setup
 ```bash
 chmod +x glawmail.sh
 ./glawmail.sh install
-
-# Add alias
-echo 'alias glawmail="~/glawmail/glawmail.sh"' >> ~/.bashrc
-source ~/.bashrc
-
-# Manage
-glawmail up       # start
-glawmail down     # stop
-glawmail status   # check status
-glawmail logs     # view logs
+glawmail up
 ```
 
-### Windows
+### Windows (run as Administrator)
 
 ```cmd
-glawmail.bat build
 glawmail.bat install
-
-:: Manage
-glawmail.bat up       :: start
-glawmail.bat down     :: stop
-glawmail.bat status   :: check status
+glawmail.bat up
 ```
 
-For auto-start on Windows login:
-```cmd
-schtasks /create /tn "GlawMail" /tr "C:\path\to\glawmail.exe" /sc onlogon /rl highest
-```
+Both automatically enable auto-start on system boot.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `up` | Start the bot |
+| `down` | Stop the bot |
+| `status` | Check if running |
+| `install` | Build + enable auto-start |
+| `uninstall` | Stop + disable auto-start |
 
 ## AI Skill
 

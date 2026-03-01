@@ -10,6 +10,7 @@ if "%1"=="down" goto stop
 if "%1"=="stop" goto stop
 if "%1"=="build" goto build
 if "%1"=="install" goto install
+if "%1"=="uninstall" goto uninstall
 if "%1"=="status" goto status
 goto usage
 
@@ -34,25 +35,37 @@ goto end
 
 :build
 echo Building...
-go build -o glawmail.exe ./cmd/glawmail
-echo Done: glawmail.exe
+go build -o "%GLAWMAIL_EXE%" ./cmd/glawmail
+echo Done: %GLAWMAIL_EXE%
 goto end
 
 :install
 echo Building...
-go build -o glawmail.exe ./cmd/glawmail
+go build -o "%GLAWMAIL_EXE%" ./cmd/glawmail
+
+echo Setting up auto-start...
+schtasks /delete /tn "GlawMail" /f >nul 2>&1
+schtasks /create /tn "GlawMail" /tr "\"%GLAWMAIL_EXE%\"" /sc onstart /ru SYSTEM /f
+if %errorlevel%==0 (
+    echo Auto-start enabled (runs at system startup)
+) else (
+    echo Warning: Could not set auto-start. Run as Administrator.
+)
 
 echo.
-echo To auto-start on login, run:
-echo   schtasks /create /tn "GlawMail" /tr "%GLAWMAIL_EXE%" /sc onlogon /rl highest
-echo.
-echo To remove auto-start:
-echo   schtasks /delete /tn "GlawMail" /f
-echo.
+echo Install complete. Run: glawmail.bat up
+goto end
+
+:uninstall
+echo Stopping...
+taskkill /IM glawmail.exe /F >nul 2>&1
+echo Removing auto-start...
+schtasks /delete /tn "GlawMail" /f >nul 2>&1
+echo Uninstalled
 goto end
 
 :usage
-echo Usage: glawmail {up^|down^|status^|build^|install}
+echo Usage: glawmail {up^|down^|status^|build^|install^|uninstall}
 goto end
 
 :end
