@@ -16,12 +16,20 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/SlaviXG/glawmail/internal/color"
 	"github.com/SlaviXG/glawmail/internal/config"
 	"github.com/SlaviXG/glawmail/internal/gmail"
 )
+
+func pathExample(filename string) string {
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf("e.g. %s or C:\\Users\\You\\%s", filename, filename)
+	}
+	return fmt.Sprintf("e.g. %s or /home/you/%s", filename, filename)
+}
 
 // ── Input helpers ─────────────────────────────────────────────────────────────
 
@@ -307,14 +315,14 @@ func setupMachineB() {
 		}
 		break
 	}
-	color.Info("Example: ./credentials.json or C:\\Users\\You\\credentials.json")
+	color.Info(pathExample("credentials.json"))
 	credPath := prompt("Path to credentials.json", func() string {
 		if v := existing["GMAIL_CREDENTIALS_FILE"]; v != "" {
 			return v
 		}
 		return "credentials.json"
 	}(), false)
-	color.Info("Example: ./token.json or C:\\Users\\You\\token.json")
+	color.Info(pathExample("token.json"))
 	tokenPath := prompt("Path to store Gmail token", func() string {
 		if v := existing["GMAIL_TOKEN_FILE"]; v != "" {
 			return v
