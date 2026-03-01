@@ -103,7 +103,7 @@ func handleMessage(msg *telegram.Message) {
 
 	email, err := parseEmail(text)
 	if err != nil {
-		bot.SendMessage(ownerChatID, fmt.Sprintf("Parse error: %v", err))
+		bot.SendMessage(ownerChatID, fmt.Sprintf("❌ %v", err))
 		logger.Printf("Parse error: %v", err)
 		return
 	}
@@ -111,13 +111,13 @@ func handleMessage(msg *telegram.Message) {
 	// Send email
 	gmailID, err := gmailSvc.SendEmail(email.To, email.Subject, email.Body, false)
 	if err != nil {
-		bot.SendMessage(ownerChatID, fmt.Sprintf("Gmail error: %v", err))
+		bot.SendMessage(ownerChatID, fmt.Sprintf("❌ Gmail: %v", err))
 		logger.Printf("Gmail send error: %v", err)
 		return
 	}
 
 	// Success
-	bot.SendMessage(ownerChatID, fmt.Sprintf("Sent to %s", email.To))
+	bot.SendMessage(ownerChatID, fmt.Sprintf("✅ Sent to %s", email.To))
 	logger.Printf("Email sent to %s (gmail_id=%s)", email.To, gmailID)
 }
 
