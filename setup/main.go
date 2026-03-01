@@ -1,392 +1,401 @@
-// Interactive setup wizard for Glawmail.
+// cmd/setup - GlawMail first-run setup wizard
 //
-// Usage:
+// Run this once on each machine before starting the main bot.
 //
-//	go run ./setup --machine a    # Configure Machine A (OpenClaw AI Bot)
-//	go run ./setup --machine b    # Configure Machine B (Approval Bot + Gmail)
+//	glawmail-setup --machine a    - configure Machine A (OpenClaw AI bot)
+//	glawmail-setup --machine b    - configure Machine B (Approval bot + Gmail)
 package main
 
 import (
 	"bufio"
 	"crypto/rand"
-	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
 
+	"github.com/SlaviXG/glawmail/internal/color"
 	"github.com/SlaviXG/glawmail/internal/config"
 	"github.com/SlaviXG/glawmail/internal/gmail"
-	"github.com/SlaviXG/glawmail/internal/telegram"
 )
 
-// ANSI color codes
-const (
-	Reset  = "\033[0m"
-	Bold   = "\033[1m"
-	Green  = "\033[32m"
-	Yellow = "\033[33m"
-	Red    = "\033[31m"
-	Cyan   = "\033[36m"
-)
+// ── Input helpers ─────────────────────────────────────────────────────────────
 
 var reader = bufio.NewReader(os.Stdin)
 
-func info(msg string)    { fmt.Printf("%si  %s%s\n", Cyan, msg, Reset) }
-func ok(msg string)      { fmt.Printf("%s✔  %s%s\n", Green, msg, Reset) }
-func warn(msg string)    { fmt.Printf("%s⚠  %s%s\n", Yellow, msg, Reset) }
-func errMsg(msg string)  { fmt.Printf("%s✖  %s%s\n", Red, msg, Reset) }
-func heading(msg string) { fmt.Printf("\n%s%s%s\n%s\n", Bold, msg, Reset, strings.Repeat("─", len(msg))) }
-
-func prompt(label, defaultVal string, validator func(string) string) string {
+func prompt(label, defaultVal string, secret bool) string {
 	for {
-		display := Bold + label + Reset
 		if defaultVal != "" {
-			display += fmt.Sprintf(" [%s]", defaultVal)
+			fmt.Printf("%s [%s]: ", color.Bold(label), defaultVal)
+		} else {
+			fmt.Printf("%s: ", color.Bold(label))
 		}
-		display += ": "
-		fmt.Print(display)
-
-		input, _ := reader.ReadString('\n')
-		value := strings.TrimSpace(input)
-		if value == "" {
-			value = defaultVal
+		if secret {
+			fmt.Print("(input hidden) ")
 		}
-		if value == "" {
-			warn("This field is required.")
-			continue
+		line, _ := reader.ReadString('\n')
+		line = strings.TrimSpace(line)
+		if line == "" {
+			line = defaultVal
 		}
-		if validator != nil {
-			if err := validator(value); err != "" {
-				warn(err)
-				continue
-			}
+		if line != "" {
+			return line
 		}
-		return value
+		color.Warn("This field is required.")
 	}
 }
 
-func promptYesNo(label string, defaultYes bool) bool {
+func promptYN(label string, defaultYes bool) bool {
 	hint := "[Y/n]"
 	if !defaultYes {
 		hint = "[y/N]"
 	}
-	fmt.Printf("%s%s%s %s: ", Bold, label, Reset, hint)
-	input, _ := reader.ReadString('\n')
-	answer := strings.ToLower(strings.TrimSpace(input))
-	if answer == "" {
+	fmt.Printf("%s %s: ", color.Bold(label), hint)
+	line, _ := reader.ReadString('\n')
+	line = strings.TrimSpace(strings.ToLower(line))
+	if line == "" {
 		return defaultYes
 	}
-	return answer == "y" || answer == "yes"
+	return line == "y" || line == "yes"
 }
 
-func validateBotToken(t string) string {
-	match, _ := regexp.MatchString(`^\d+:[A-Za-z0-9_-]{35,}$`, t)
-	if !match {
-		return "Expected format: 123456789:ABCdef..."
+// ── Validators ────────────────────────────────────────────────────────────────
+
+var (
+	botTokenRe = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]{35,}$`)
+	chatIDRe   = regexp.MustCompile(`^-?\d+$`)
+	emailRe    = regexp.MustCompile(`^[^@]+@[^@]+\.[^@]+$`)
+)
+
+// ── Telegram API helpers ──────────────────────────────────────────────────────
+
+func tgGetMe(token string) (username string, id int64, err error) {
+	resp, err := http.Get(fmt.Sprintf("https://api.telegram.org/bot%s/getMe", token))
+	if err != nil {
+		return "", 0, err
 	}
-	return ""
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var result struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Username string `json:"username"`
+			ID       int64  `json:"id"`
+		} `json:"result"`
+		Description string `json:"description"`
+	}
+	json.Unmarshal(body, &result)
+	if !result.OK {
+		return "", 0, fmt.Errorf("%s", result.Description)
+	}
+	return result.Result.Username, result.Result.ID, nil
 }
 
-func validateChatID(c string) string {
-	match, _ := regexp.MatchString(`^-?\d+$`, c)
-	if !match {
-		return "Chat ID must be numeric (e.g. 987654321)"
+func tgSendMessage(token, chatID, text string) error {
+	body := fmt.Sprintf(`{"chat_id":%s,"text":%q}`, chatID, text)
+	resp, err := http.Post(
+		fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token),
+		"application/json",
+		strings.NewReader(body),
+	)
+	if err != nil {
+		return err
 	}
-	return ""
+	defer resp.Body.Close()
+	var result struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	json.Unmarshal(raw, &result)
+	if !result.OK {
+		return fmt.Errorf("%s", result.Description)
+	}
+	return nil
 }
 
-func validateEmail(e string) string {
-	if !strings.Contains(e, "@") || !strings.Contains(strings.Split(e, "@")[1], ".") {
-		return "Doesn't look like a valid email address"
-	}
-	return ""
-}
+// ── Secret generation ─────────────────────────────────────────────────────────
 
 func generateSecret() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		// Should never happen
+		panic("crypto/rand unavailable: " + err.Error())
+	}
+	return fmt.Sprintf("%x", buf)
 }
 
+// ── Machine A setup ───────────────────────────────────────────────────────────
+
 func setupMachineA() {
-	heading("Machine A - OpenClaw AI Bot Setup")
-
-	existing, _ := config.LoadEnv(".env")
-
-	fmt.Println("Machine A runs your OpenClaw AI bot. It generates emails and sends")
-	fmt.Println("approval requests to Machine B via Telegram. It listens for decline")
-	fmt.Println("callbacks on its own bot - no public endpoint needed.")
+	color.Heading("Machine A - OpenClaw AI Bot Setup")
+	fmt.Println("Machine A runs your AI bot. It sends approval requests to Machine B")
+	fmt.Println("and receives callbacks via Telegram. No public endpoint required.")
 	fmt.Println()
 
-	// Step 1: Own bot token
-	heading("Step 1 / 4 - OpenClaw Bot Token")
-	info("This is the token for YOUR AI bot (@openclawbot or similar).")
-	info("Create it via @BotFather if you haven't already.")
+	existing := loadExisting()
 
-	var ownToken string
+	// Own bot token
+	color.Heading("Step 1 / 3 - OpenClaw Bot Token")
+	color.Info("Create this bot via @BotFather (/newbot) if you haven't already.")
+	var ownToken, botUsername string
 	for {
-		ownToken = prompt("OpenClaw bot token", existing["OWN_BOT_TOKEN"], validateBotToken)
-		info("Verifying...")
-		bot := telegram.NewBot(ownToken)
-		me, err := bot.GetMe()
-		if err != nil {
-			errMsg(fmt.Sprintf("Rejected: %v", err))
-			if !promptYesNo("Try again?", true) {
-				os.Exit(1)
-			}
+		ownToken = prompt("OpenClaw bot token", existing["OWN_BOT_TOKEN"], true)
+		if !botTokenRe.MatchString(ownToken) {
+			color.Warn("Expected format: 123456789:ABCdef...")
 			continue
 		}
-		ok(fmt.Sprintf("Token valid - bot: @%s", me.Username))
+		color.Info("Verifying with Telegram API...")
+		username, _, err := tgGetMe(ownToken)
+		if err != nil {
+			color.Err(fmt.Sprintf("Token rejected: %v", err))
+			continue
+		}
+		botUsername = username
+		color.Ok(fmt.Sprintf("Token valid - bot: @%s", botUsername))
 		break
 	}
 
-	// Step 2: Owner chat ID
-	heading("Step 2 / 4 - Your Telegram Chat ID")
-	info("Machine A needs your chat ID to forward any status messages to you.")
-	info("Get it from @userinfobot.")
-
+	// Owner chat ID
+	color.Heading("Step 2 / 3 - Your Telegram Chat ID")
+	color.Info("Get your chat ID from @userinfobot on Telegram.")
 	var ownerChatID string
-	bot := telegram.NewBot(ownToken)
 	for {
-		ownerChatID = prompt("Your Telegram chat ID", existing["OWNER_CHAT_ID"], validateChatID)
-		info("Sending test message via OpenClaw bot...")
-		chatID := parseInt64(ownerChatID)
-		_, err := bot.SendMessage(chatID, "✅ OpenClaw bot connected successfully!")
-		if err != nil {
-			errMsg(fmt.Sprintf("Failed: %v", err))
-			warn("Make sure you've sent /start to your OpenClaw bot first.")
-			if !promptYesNo("Try again?", true) {
-				os.Exit(1)
-			}
+		ownerChatID = prompt("Your Telegram chat ID", existing["OWNER_CHAT_ID"], false)
+		if !chatIDRe.MatchString(ownerChatID) {
+			color.Warn("Must be a number, e.g. 987654321")
 			continue
 		}
-		ok("Test message sent!")
+		color.Info("Sending test message...")
+		if err := tgSendMessage(ownToken, ownerChatID, "GlawMail setup: OpenClaw bot connected successfully!"); err != nil {
+			color.Err(fmt.Sprintf("Could not send: %v", err))
+			color.Warn("Make sure you have sent /start to @" + botUsername + " first.")
+			continue
+		}
+		color.Ok("Test message sent - check your Telegram!")
 		break
 	}
 
-	// Step 3: Approval bot chat ID
-	heading("Step 3 / 4 - Approval Bot Chat ID")
-	info("Machine A sends approval requests TO Machine B's bot.")
-	info("You need the numeric user ID of Machine B's bot (@approvalbot).")
-	fmt.Println("Two ways to get it:")
-	fmt.Println("  a) Run setup --machine b first - it will print the bot ID")
-	fmt.Println("  b) Forward a message from @approvalbot to @userinfobot")
-	fmt.Println()
+	// Approval bot chat ID + shared secret
+	color.Heading("Step 3 / 3 - Approval Bot + Shared Secret")
+	color.Info("You need the numeric ID of Machine B's bot (@approvalbot).")
+	color.Info("Run 'glawmail-setup --machine b' first - it prints the bot ID on startup.")
+	var peerChatID string
+	for {
+		peerChatID = prompt("Approval bot numeric ID", existing["APPROVAL_BOT_CHAT_ID"], false)
+		if !chatIDRe.MatchString(peerChatID) {
+			color.Warn("Must be a number.")
+			continue
+		}
+		break
+	}
 
-	approvalBotChatID := prompt("Approval bot's Telegram user ID", existing["APPROVAL_BOT_CHAT_ID"], validateChatID)
-
-	// Step 4: Shared secret
-	heading("Step 4 / 4 - Shared HMAC Secret")
-	existingWS := existing["WEBHOOK_SECRET"]
-	var webhookSecret string
-	if existingWS != "" {
-		info("Existing WEBHOOK_SECRET found.")
-		if promptYesNo("Keep it?", true) {
-			webhookSecret = existingWS
-		} else {
+	webhookSecret := existing["WEBHOOK_SECRET"]
+	if webhookSecret != "" {
+		color.Info("Existing WEBHOOK_SECRET found.")
+		if !promptYN("Keep existing WEBHOOK_SECRET?", true) {
 			webhookSecret = generateSecret()
 		}
 	} else {
 		webhookSecret = generateSecret()
 	}
 
-	ok("WEBHOOK_SECRET:")
-	fmt.Printf("\n  %s%s%s\n\n", Bold, webhookSecret, Reset)
-	warn("Copy this exact value into Machine B's .env WEBHOOK_SECRET.")
-	fmt.Printf("%sPress Enter once you've noted it...%s ", Bold, Reset)
-	reader.ReadString('\n')
+	fmt.Printf("\n  WEBHOOK_SECRET: %s\n\n", color.Bold(webhookSecret))
+	color.Warn("Copy this exact value to Machine B's WEBHOOK_SECRET in its .env file.")
+	prompt("Press Enter once you have noted it", " ", false)
 
-	err := config.WriteEnv(".env", map[string]string{
+	values := map[string]string{
 		"OWN_BOT_TOKEN":        ownToken,
 		"OWNER_CHAT_ID":        ownerChatID,
-		"APPROVAL_BOT_CHAT_ID": approvalBotChatID,
+		"APPROVAL_BOT_CHAT_ID": peerChatID,
 		"WEBHOOK_SECRET":       webhookSecret,
-	})
-	if err != nil {
-		errMsg(fmt.Sprintf("Failed to write .env: %v", err))
+	}
+	if err := config.Write(".env", values); err != nil {
+		color.Err(fmt.Sprintf("Could not write .env: %v", err))
 		os.Exit(1)
 	}
-	ok("Written .env (mode 600)")
-
 	fmt.Println()
-	ok("Machine A setup complete! Start with:")
-	fmt.Printf("  %sgo run ./cmd/machine_a%s\n", Bold, Reset)
+	color.Ok("Machine A setup complete. Start with:")
+	fmt.Printf("  %s\n", color.Bold("glawmail-a"))
 }
+
+// ── Machine B setup ───────────────────────────────────────────────────────────
 
 func setupMachineB() {
-	heading("Machine B - Approval Bot + Gmail Sender Setup")
-
-	existing, _ := config.LoadEnv(".env")
-
-	fmt.Println("Machine B runs the Telegram approval bot and Gmail sender.")
-	fmt.Println("It never shares credentials or network access with Machine A.")
-	fmt.Println("Telegram is the only relay between the two machines.")
+	color.Heading("Machine B - Approval Bot + Gmail Sender Setup")
+	fmt.Println("Machine B runs the Telegram approval bot and sends emails via Gmail.")
+	fmt.Println("It never shares credentials with Machine A.")
 	fmt.Println()
 
-	// Step 1: Approval bot token
-	heading("Step 1 / 5 - Approval Bot Token")
-	info("This is a SEPARATE bot from the OpenClaw bot on Machine A.")
-	info("Create a new bot via @BotFather (/newbot).")
+	existing := loadExisting()
 
+	// Own bot token
+	color.Heading("Step 1 / 5 - Approval Bot Token")
+	color.Info("This must be a DIFFERENT bot from the one on Machine A.")
+	color.Info("Create via @BotFather (/newbot).")
 	var ownToken string
-	var botID string
 	for {
-		ownToken = prompt("Approval bot token", existing["OWN_BOT_TOKEN"], validateBotToken)
-		info("Verifying...")
-		bot := telegram.NewBot(ownToken)
-		me, err := bot.GetMe()
-		if err != nil {
-			errMsg(fmt.Sprintf("Rejected: %v", err))
-			if !promptYesNo("Try again?", true) {
-				os.Exit(1)
-			}
+		ownToken = prompt("Approval bot token", existing["OWN_BOT_TOKEN"], true)
+		if !botTokenRe.MatchString(ownToken) {
+			color.Warn("Expected format: 123456789:ABCdef...")
 			continue
 		}
-		ok(fmt.Sprintf("Token valid - bot: @%s", me.Username))
-		botID = fmt.Sprintf("%d", me.ID)
-		fmt.Println()
-		info(fmt.Sprintf("This bot's numeric ID is: %s%s%s", Bold, botID, Reset))
-		warn("You'll need this value for Machine A's APPROVAL_BOT_CHAT_ID.")
-		fmt.Printf("%sPress Enter once you've noted the bot ID...%s ", Bold, Reset)
-		reader.ReadString('\n')
+		color.Info("Verifying...")
+		username, botID, err := tgGetMe(ownToken)
+		if err != nil {
+			color.Err(fmt.Sprintf("Token rejected: %v", err))
+			continue
+		}
+		color.Ok(fmt.Sprintf("Token valid - bot: @%s", username))
+		fmt.Printf("\n  This bot's numeric ID: %s\n\n", color.Bold(fmt.Sprintf("%d", botID)))
+		color.Warn("You will need this number for Machine A's APPROVAL_BOT_CHAT_ID.")
+		prompt("Press Enter once you have noted the bot ID", " ", false)
 		break
 	}
 
-	// Step 2: Owner chat ID
-	heading("Step 2 / 5 - Your Telegram Chat ID")
-	info("Machine B sends approval previews to your personal Telegram chat.")
-	info("Get your chat ID from @userinfobot.")
-
+	// Owner chat ID
+	color.Heading("Step 2 / 5 - Your Telegram Chat ID")
+	color.Info("Get your chat ID from @userinfobot.")
 	var ownerChatID string
-	bot := telegram.NewBot(ownToken)
 	for {
-		ownerChatID = prompt("Your Telegram chat ID", existing["OWNER_CHAT_ID"], validateChatID)
-		info("Sending test message via approval bot...")
-		chatID := parseInt64(ownerChatID)
-		_, err := bot.SendMessage(chatID, "✅ Approval bot connected successfully!")
-		if err != nil {
-			errMsg(fmt.Sprintf("Failed: %v", err))
-			warn("Make sure you've sent /start to the approval bot first.")
-			if !promptYesNo("Try again?", true) {
-				os.Exit(1)
-			}
+		ownerChatID = prompt("Your Telegram chat ID", existing["OWNER_CHAT_ID"], false)
+		if !chatIDRe.MatchString(ownerChatID) {
+			color.Warn("Must be a number.")
 			continue
 		}
-		ok("Test message sent!")
+		color.Info("Sending test message...")
+		if err := tgSendMessage(ownToken, ownerChatID, "GlawMail setup: Approval bot connected successfully!"); err != nil {
+			color.Err(fmt.Sprintf("Could not send: %v", err))
+			color.Warn("Make sure you have sent /start to the approval bot first.")
+			continue
+		}
+		color.Ok("Test message sent - check your Telegram!")
 		break
 	}
 
-	// Step 3: OpenClaw bot chat ID
-	heading("Step 3 / 5 - OpenClaw Bot Chat ID")
-	info("When you decline an email, Machine B sends a message TO Machine A's bot.")
-	info("You need the numeric user ID of @openclawbot.")
-	info("Get it by forwarding a message from @openclawbot to @userinfobot.")
-
-	openclawBotChatID := prompt("OpenClaw bot's Telegram user ID", existing["OPENCLAW_BOT_CHAT_ID"], validateChatID)
-
-	// Step 4: Shared webhook secret
-	heading("Step 4 / 5 - Shared HMAC Secret")
-	info("Paste the WEBHOOK_SECRET generated on Machine A.")
-	webhookSecret := prompt("WEBHOOK_SECRET", existing["WEBHOOK_SECRET"], nil)
-
-	// Step 5: Gmail OAuth
-	heading("Step 5 / 5 - Gmail Account + OAuth")
-	gmailFrom := prompt("Gmail address to send from", existing["GMAIL_FROM"], validateEmail)
-	tokenPath := prompt("Path to store Gmail OAuth token", orDefault(existing["GMAIL_TOKEN_FILE"], "token.json"), nil)
-
-	if fileExists(tokenPath) {
-		info(fmt.Sprintf("%s already exists.", tokenPath))
-		if promptYesNo("Re-run Gmail OAuth flow?", false) {
-			runGmailOAuth(tokenPath)
+	// OpenClaw bot chat ID
+	color.Heading("Step 3 / 5 - OpenClaw Bot Chat ID")
+	color.Info("Machine B sends callbacks TO Machine A's bot (@openclawbot).")
+	color.Info("Get @openclawbot's numeric ID by forwarding a message from it to @userinfobot.")
+	var peerChatID string
+	for {
+		peerChatID = prompt("OpenClaw bot numeric ID", existing["OPENCLAW_BOT_CHAT_ID"], false)
+		if !chatIDRe.MatchString(peerChatID) {
+			color.Warn("Must be a number.")
+			continue
 		}
-	} else {
-		runGmailOAuth(tokenPath)
+		break
 	}
 
-	err := config.WriteEnv(".env", map[string]string{
-		"OWN_BOT_TOKEN":        ownToken,
-		"OWNER_CHAT_ID":        ownerChatID,
-		"OPENCLAW_BOT_CHAT_ID": openclawBotChatID,
-		"WEBHOOK_SECRET":       webhookSecret,
-		"GMAIL_FROM":           gmailFrom,
-		"GMAIL_TOKEN_FILE":     tokenPath,
-	})
+	// Shared secret
+	color.Heading("Step 4 / 5 - Shared HMAC Secret")
+	color.Info("Paste the WEBHOOK_SECRET generated on Machine A.")
+	webhookSecret := prompt("WEBHOOK_SECRET", existing["WEBHOOK_SECRET"], true)
+
+	// Gmail
+	color.Heading("Step 5 / 5 - Gmail Account + OAuth")
+	var gmailFrom string
+	for {
+		gmailFrom = prompt("Gmail address to send from", existing["GMAIL_FROM"], false)
+		if !emailRe.MatchString(gmailFrom) {
+			color.Warn("Does not look like a valid email.")
+			continue
+		}
+		break
+	}
+	credPath := prompt("Path to credentials.json", existing["GMAIL_CREDENTIALS_FILE"], false)
+	tokenPath := prompt("Path to store Gmail token", func() string {
+		if v := existing["GMAIL_TOKEN_FILE"]; v != "" {
+			return v
+		}
+		return "token.json"
+	}(), false)
+
+	_, tokenExists := os.Stat(tokenPath)
+	if os.IsNotExist(tokenExists) || promptYN("Re-run Gmail OAuth flow?", false) {
+		if _, err := os.Stat(credPath); os.IsNotExist(err) {
+			color.Err(fmt.Sprintf("%s not found. Download it from Google Cloud Console first.", credPath))
+			os.Exit(1)
+		}
+		color.Info("Running Gmail OAuth flow - follow the link printed below:")
+		fmt.Println("  1. https://console.cloud.google.com/ - your project")
+		fmt.Println("  2. APIs and Services - Enable Gmail API")
+		fmt.Println("  3. OAuth consent screen - add your Gmail as a test user")
+		fmt.Println("  4. Credentials - Create OAuth 2.0 Client ID (Desktop app)")
+		fmt.Println("  5. Download JSON and save as credentials.json")
+		fmt.Println()
+		if err := gmail.RunOAuthFlow(credPath, tokenPath); err != nil {
+			color.Err(fmt.Sprintf("OAuth failed: %v", err))
+			os.Exit(1)
+		}
+		color.Ok(fmt.Sprintf("Gmail token saved to %s", tokenPath))
+	}
+
+	values := map[string]string{
+		"OWN_BOT_TOKEN":          ownToken,
+		"OWNER_CHAT_ID":          ownerChatID,
+		"OPENCLAW_BOT_CHAT_ID":   peerChatID,
+		"WEBHOOK_SECRET":         webhookSecret,
+		"GMAIL_FROM":             gmailFrom,
+		"GMAIL_CREDENTIALS_FILE": credPath,
+		"GMAIL_TOKEN_FILE":       tokenPath,
+	}
+	if err := config.Write(".env", values); err != nil {
+		color.Err(fmt.Sprintf("Could not write .env: %v", err))
+		os.Exit(1)
+	}
+	fmt.Println()
+	color.Ok("Machine B setup complete. Start with:")
+	fmt.Printf("  %s\n", color.Bold("glawmail-b"))
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+func loadExisting() map[string]string {
+	existing := map[string]string{}
+	f, err := os.Open(".env")
 	if err != nil {
-		errMsg(fmt.Sprintf("Failed to write .env: %v", err))
-		os.Exit(1)
+		return existing
 	}
-	ok("Written .env (mode 600)")
-
-	fmt.Println()
-	ok("Machine B setup complete! Start with:")
-	fmt.Printf("  %sgo run ./cmd/machine_b%s\n", Bold, Reset)
-}
-
-func runGmailOAuth(tokenPath string) {
-	fmt.Println()
-	info("You need credentials.json from Google Cloud Console:")
-	fmt.Println("  1. https://console.cloud.google.com/ → your project")
-	fmt.Println("  2. APIs & Services → Enable Gmail API")
-	fmt.Println("  3. OAuth consent screen → add your Gmail as a test user")
-	fmt.Println("  4. Credentials → Create OAuth 2.0 Client ID (Desktop app)")
-	fmt.Println("  5. Download JSON → save as credentials.json here")
-	fmt.Println()
-
-	credsPath := prompt("Path to credentials.json", "credentials.json", nil)
-	if !fileExists(credsPath) {
-		errMsg(fmt.Sprintf("%s not found. Download it first.", credsPath))
-		os.Exit(1)
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if ok {
+			existing[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
 	}
-
-	info("Opening browser for Gmail authorization...")
-	if err := gmail.RunOAuthFlow(credsPath, tokenPath); err != nil {
-		errMsg(fmt.Sprintf("OAuth failed: %v", err))
-		os.Exit(1)
-	}
-	ok(fmt.Sprintf("Gmail token saved to %s (mode 600)", tokenPath))
+	return existing
 }
 
-func parseInt64(s string) int64 {
-	var n int64
-	fmt.Sscanf(s, "%d", &n)
-	return n
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func orDefault(val, def string) string {
-	if val != "" {
-		return val
-	}
-	return def
-}
+// ── Entry point ───────────────────────────────────────────────────────────────
 
 func main() {
-	machine := flag.String("machine", "", "'a' = OpenClaw AI Bot  |  'b' = Approval Bot + Gmail")
+	machine := flag.String("machine", "", "Which machine to configure: 'a' or 'b'")
 	flag.Parse()
 
-	if *machine != "a" && *machine != "b" {
-		fmt.Println("Usage: go run ./setup --machine a|b")
-		fmt.Println("  --machine a    Configure Machine A (OpenClaw AI Bot)")
-		fmt.Println("  --machine b    Configure Machine B (Approval Bot + Gmail)")
-		os.Exit(1)
-	}
-
-	fmt.Printf("\n%s%s\n", Bold, strings.Repeat("=", 55))
-	fmt.Println("  Glawmail - First-Run Setup Wizard")
-	fmt.Printf("%s%s\n", strings.Repeat("=", 55), Reset)
-	fmt.Println("Secrets are written to .env (mode 600) and never")
+	fmt.Printf("\n%s\n", color.Bold("================================================"))
+	fmt.Printf("%s\n", color.Bold("  GlawMail - First-Run Setup Wizard"))
+	fmt.Printf("%s\n", color.Bold("================================================"))
+	fmt.Println("Secrets are written to .env (mode 0600) and never")
 	fmt.Println("stored in source code or shown after confirmation.")
 	fmt.Println()
 
-	if *machine == "a" {
+	switch strings.ToLower(*machine) {
+	case "a":
 		setupMachineA()
-	} else {
+	case "b":
 		setupMachineB()
+	default:
+		fmt.Fprintln(os.Stderr, "Usage: glawmail-setup --machine <a|b>")
+		os.Exit(1)
 	}
 }

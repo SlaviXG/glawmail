@@ -36,6 +36,11 @@ func LoadEnv(path string) (map[string]string, error) {
 
 // WriteEnv writes environment variables to a .env file with mode 0600.
 func WriteEnv(path string, values map[string]string) error {
+	return Write(path, values)
+}
+
+// Write writes environment variables to a .env file with mode 0600.
+func Write(path string, values map[string]string) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
