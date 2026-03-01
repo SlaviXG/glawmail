@@ -336,12 +336,13 @@ func setupMachineB() {
 			color.Err(fmt.Sprintf("%s not found. Download it from Google Cloud Console first.", credPath))
 			os.Exit(1)
 		}
-		color.Info("Running Gmail OAuth flow - follow the link printed below:")
+		color.Info("If you haven't set up Google Cloud yet:")
 		fmt.Println("  1. https://console.cloud.google.com/ - your project")
 		fmt.Println("  2. APIs and Services - Enable Gmail API")
 		fmt.Println("  3. OAuth consent screen - add your Gmail as a test user")
-		fmt.Println("  4. Credentials - Create OAuth 2.0 Client ID (Desktop app)")
-		fmt.Println("  5. Download JSON and save as credentials.json")
+		fmt.Println("  4. Credentials - Create OAuth 2.0 Client ID")
+		fmt.Println("     IMPORTANT: Select 'Desktop app' (NOT 'Web application')")
+		fmt.Println("  5. Download JSON - that's your credentials.json")
 		fmt.Println()
 		if err := gmail.RunOAuthFlow(credPath, tokenPath); err != nil {
 			color.Err(fmt.Sprintf("OAuth failed: %v", err))

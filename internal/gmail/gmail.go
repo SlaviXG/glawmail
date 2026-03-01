@@ -133,7 +133,7 @@ func RunOAuthFlow(credentialsFile, tokenFile string) error {
 
 	config, err := google.ConfigFromJSON(credData, scopes...)
 	if err != nil {
-		return fmt.Errorf("parsing credentials: %w", err)
+		return fmt.Errorf("parsing credentials (make sure you created a 'Desktop app' OAuth client, not 'Web application'): %w", err)
 	}
 
 	// Find an available port
