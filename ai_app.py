@@ -89,8 +89,8 @@ def request_email_approval(
     Returns the callback_id so you can correlate approval and decline events.
 
     Machine B will either:
-      - Send an APPROVED:<json> message back to this bot after Gmail sends successfully
-      - Send a DECLINE:<json> message back to this bot if the owner rejects it
+      - Send an GLAWMAIL_APPROVED:<json> message back to this bot after Gmail sends successfully
+      - Send a GLAWMAIL_DECLINE:<json> message back to this bot if the owner rejects it
     """
     callback_id = str(uuid.uuid4())
     payload = {
@@ -103,8 +103,8 @@ def request_email_approval(
     }
     payload_str = json.dumps(payload)
     # Prefix so Machine B can identify approval request messages
-    # Format: APPROVAL_REQUEST:<hmac_sig>:<json_payload>
-    message = f"APPROVAL_REQUEST:{_sign(payload_str)}:{payload_str}"
+    # Format: GLAWMAIL_APPROVAL_REQUEST:<hmac_sig>:<json_payload>
+    message = f"GLAWMAIL_APPROVAL_REQUEST:{_sign(payload_str)}:{payload_str}"
     _send_to_approval_bot(message)
     logger.info("Approval request sent for %s (callback_id=%s)", to, callback_id)
     return callback_id
@@ -116,7 +116,7 @@ def handle_approved_email(callback_id: str, to: str, subject: str, gmail_id: str
     Called when Machine B confirms the email was sent via Gmail.
     Replace the body with your actual business logic.
     """
-    logger.info("APPROVED - id=%s | to=%s | subject=%s | gmail_id=%s | metadata=%s",
+    logger.info("GLAWMAIL_APPROVED - id=%s | to=%s | subject=%s | gmail_id=%s | metadata=%s",
                 callback_id, to, subject, gmail_id, metadata)
     # e.g. db.mark_sent(callback_id, gmail_id)
     # e.g. crm.log_outreach(to, subject)
@@ -128,7 +128,7 @@ def handle_declined_email(callback_id: str, to: str, subject: str, metadata: dic
     Called when the owner taps Decline in Telegram.
     Replace the body with your actual business logic.
     """
-    logger.info("DECLINED - id=%s | to=%s | subject=%s | metadata=%s",
+    logger.info("GLAWMAIL_DECLINED - id=%s | to=%s | subject=%s | metadata=%s",
                 callback_id, to, subject, metadata)
     # e.g. db.mark_declined(callback_id)
     # e.g. agent.notify_declined(callback_id)
@@ -158,18 +158,18 @@ def handle_error_email(callback_id: str, to: str, subject: str,
 
 def _process_status_message(text: str):
     """
-    Parse and verify an APPROVED, DECLINE, or ERROR message from Machine B's bot.
+    Parse and verify an GLAWMAIL_APPROVED, GLAWMAIL_DECLINE, or GLAWMAIL_ERROR message from Machine B's bot.
     Format: <PREFIX>:<hmac_sig>:<json_payload>
     """
     try:
         prefix, sig, payload_str = text.split(":", 2)
-        if prefix not in ("APPROVED", "DECLINE", "ERROR"):
+        if prefix not in ("GLAWMAIL_APPROVED", "GLAWMAIL_DECLINE", "GLAWMAIL_ERROR"):
             return
         if not _verify(payload_str, sig):
             logger.warning("%s message failed HMAC verification - ignoring", prefix)
             return
         data = json.loads(payload_str)
-        if prefix == "APPROVED":
+        if prefix == "GLAWMAIL_APPROVED":
             handle_approved_email(
                 callback_id = data.get("callback_id", ""),
                 to          = data.get("to", ""),
@@ -177,14 +177,14 @@ def _process_status_message(text: str):
                 gmail_id    = data.get("gmail_id", ""),
                 metadata    = data.get("metadata", {}),
             )
-        elif prefix == "DECLINE":
+        elif prefix == "GLAWMAIL_DECLINE":
             handle_declined_email(
                 callback_id = data.get("callback_id", ""),
                 to          = data.get("to", ""),
                 subject     = data.get("subject", ""),
                 metadata    = data.get("metadata", {}),
             )
-        elif prefix == "ERROR":
+        elif prefix == "GLAWMAIL_ERROR":
             handle_error_email(
                 callback_id = data.get("callback_id", ""),
                 to          = data.get("to", ""),
@@ -201,7 +201,7 @@ def _process_status_message(text: str):
 def _poll_updates():
     """
     Long-polls the Telegram Bot API for incoming messages to @openclawbot.
-    Filters for APPROVED and DECLINE messages from Machine B's bot only.
+    Filters for GLAWMAIL_APPROVED, GLAWMAIL_DECLINE, and GLAWMAIL_ERROR messages from Machine B's bot only.
     Runs in a background thread.
     """
     offset = 0
@@ -223,9 +223,9 @@ def _poll_updates():
                 if sender_id != APPROVAL_BOT_CHAT_ID:
                     continue
                 text = msg.get("text", "")
-                if (text.startswith("APPROVED:") or
-                        text.startswith("DECLINE:") or
-                        text.startswith("ERROR:")):
+                if (text.startswith("GLAWMAIL_APPROVED:") or
+                        text.startswith("GLAWMAIL_DECLINE:") or
+                        text.startswith("GLAWMAIL_ERROR:")):
                     _process_status_message(text)
         except requests.exceptions.Timeout:
             pass  # Normal for long-polling

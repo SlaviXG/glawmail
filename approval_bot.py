@@ -1,10 +1,10 @@
 """
 approval_bot.py - Machine B (Approval Bot + Gmail Sender)
 ==========================================================
-Polls its own bot (@approvalbot) for APPROVAL_REQUEST messages from Machine A.
+Polls its own bot (@approvalbot) for GLAWMAIL_APPROVAL_REQUEST messages from Machine A.
 Shows email previews with ✅ / ❌ buttons to the owner.
   ✅ → sends email via Gmail API
-  ❌ → sends a signed DECLINE message back to Machine A's bot (@openclawbot)
+  ❌ → sends a signed GLAWMAIL_DECLINE message back to Machine A's bot (@openclawbot)
 
 No public endpoint required. No direct networking to Machine A.
 Telegram is the only transport between machines.
@@ -114,7 +114,7 @@ def _send_to_openclaw(prefix: str, email_data: dict, extra: dict | None = None):
     Send a signed status message to Machine A's bot (@openclawbot).
     Format: <PREFIX>:<hmac_sig>:<json_payload>
 
-    Used for APPROVED, DECLINE, and ERROR events.
+    Used for GLAWMAIL_APPROVED, GLAWMAIL_DECLINE, and GLAWMAIL_ERROR events.
     Failures here are logged but never re-raised - the caller should not crash
     because of a notification delivery problem.
     """
@@ -172,18 +172,18 @@ def _send_gmail(to: str, subject: str, body: str, html: bool) -> str:
     return result["id"]
 
 
-# ── Process incoming APPROVAL_REQUEST from Machine A ─────────────────────────
+# ── Process incoming GLAWMAIL_APPROVAL_REQUEST from Machine A ─────────────────────────
 def _process_approval_request(text: str):
     """
-    Parse and verify an APPROVAL_REQUEST message from @openclawbot.
-    Format: APPROVAL_REQUEST:<hmac_sig>:<json_payload>
+    Parse and verify an GLAWMAIL_APPROVAL_REQUEST message from @openclawbot.
+    Format: GLAWMAIL_APPROVAL_REQUEST:<hmac_sig>:<json_payload>
     """
     try:
         prefix, sig, payload_str = text.split(":", 2)
-        if prefix != "APPROVAL_REQUEST":
+        if prefix != "GLAWMAIL_APPROVAL_REQUEST":
             return
         if not _verify(payload_str, sig):
-            logger.warning("APPROVAL_REQUEST failed HMAC verification - ignoring")
+            logger.warning("GLAWMAIL_APPROVAL_REQUEST failed HMAC verification - ignoring")
             return
         data        = json.loads(payload_str)
         callback_id = data.get("callback_id")
@@ -192,7 +192,7 @@ def _process_approval_request(text: str):
         body        = data.get("body", "")
 
         if not callback_id or not to:
-            logger.warning("APPROVAL_REQUEST missing callback_id or to - ignoring")
+            logger.warning("GLAWMAIL_APPROVAL_REQUEST missing callback_id or to - ignoring")
             return
 
         pending[callback_id] = data
@@ -208,7 +208,7 @@ def _process_approval_request(text: str):
         except Exception as exc:
             # Could not deliver the preview to the owner via Telegram
             pending.pop(callback_id, None)
-            _send_to_openclaw("ERROR", data, extra={
+            _send_to_openclaw("GLAWMAIL_ERROR", data, extra={
                 "stage":  "telegram_preview",
                 "reason": str(exc),
             })
@@ -252,7 +252,7 @@ def _process_callback_query(callback_query: dict):
                 message_id,
                 f"✅ Sent to <b>{email_data['to']}</b>\n<i>Gmail ID: {gmail_id}</i>"
             )
-            _send_to_openclaw("APPROVED", email_data, extra={"gmail_id": gmail_id})
+            _send_to_openclaw("GLAWMAIL_APPROVED", email_data, extra={"gmail_id": gmail_id})
             logger.info("Email %s sent to %s", callback_id, email_data["to"])
         except Exception as exc:
             error_msg = str(exc)
@@ -267,7 +267,7 @@ def _process_callback_query(callback_query: dict):
                 message_id=message_id,
                 reply_markup=_keyboard(callback_id))
             # Notify Machine A so it is not left waiting
-            _send_to_openclaw("ERROR", email_data, extra={
+            _send_to_openclaw("GLAWMAIL_ERROR", email_data, extra={
                 "stage":   "gmail_send",
                 "reason":  error_msg,
             })
@@ -279,14 +279,14 @@ def _process_callback_query(callback_query: dict):
             f"🚫 <b>Declined</b> - email to <b>{email_data['to']}</b> discarded.\n"
             f"<i>Notifying AI...</i>"
         )
-        _send_to_openclaw("DECLINE", email_data, extra={"reason": "declined_by_owner"})
+        _send_to_openclaw("GLAWMAIL_DECLINE", email_data, extra={"reason": "declined_by_owner"})
 
 
 # ── Main polling loop ─────────────────────────────────────────────────────────
 def run():
     """
     Long-poll the Telegram Bot API for:
-      - Messages from @openclawbot (APPROVAL_REQUEST)
+      - Messages from @openclawbot (GLAWMAIL_APPROVAL_REQUEST)
       - callback_query events (button presses from the owner)
     """
     offset = 0
@@ -313,7 +313,7 @@ def run():
                     sender_id = str(msg.get("from", {}).get("id", ""))
                     text      = msg.get("text", "")
                     # Only process messages from Machine A's bot
-                    if sender_id == OPENCLAW_BOT_CHAT_ID and text.startswith("APPROVAL_REQUEST:"):
+                    if sender_id == OPENCLAW_BOT_CHAT_ID and text.startswith("GLAWMAIL_APPROVAL_REQUEST:"):
                         _process_approval_request(text)
 
                 elif "callback_query" in update:

@@ -1,4 +1,4 @@
-# Email Approval Bot
+# GlawMail - Email Approval Bot
 
 Human-in-the-loop email sending via Telegram. Two bots, two machines, zero shared
 networking - Telegram is the only transport between them.
@@ -13,8 +13,8 @@ Machine A - OpenClaw AI Bot (@openclawbot)
 │  ai_app.py                                  │
 │                                             │
 │  1. Generates email                         │
-│  2. Sends APPROVAL_REQUEST to @approvalbot  │──────────────────────────────►
-│  5. Polls own bot for APPROVED/DECLINE messages  │◄─────────────────────────
+│  2. Sends GLAWMAIL_APPROVAL_REQUEST to @approvalbot  │──────────────────────────────►
+│  5. Polls own bot for GLAWMAIL_APPROVED/GLAWMAIL_DECLINE messages  │◄─────────────────────────
 │  6. Calls handle_approved_email()               │
 │     or handle_declined_email()                  │
 └─────────────────────────────────────────────┘
@@ -26,10 +26,10 @@ Machine A - OpenClaw AI Bot (@openclawbot)
                              ┌──────────────────────────────────────┐
                              │  approval_bot.py                     │
                              │                                      │
-                             │  3. Receives APPROVAL_REQUEST        │
+                             │  3. Receives GLAWMAIL_APPROVAL_REQUEST        │
                              │  4. Shows preview + ✅/❌ to owner   │
                              │     ✅ → sends via Gmail API         │
-                             │     ❌ → sends DECLINE to @openclaw  │
+                             │     ❌ → sends GLAWMAIL_DECLINE to @openclaw  │
                              └──────────────────────────────────────┘
 ```
 
@@ -48,7 +48,7 @@ Machine A - OpenClaw AI Bot (@openclawbot)
 ### Machine A to Machine B (approval request)
 Sent as a Telegram message from @openclawbot to @approvalbot:
 ```
-APPROVAL_REQUEST:<sha256_hmac>:<json_payload>
+GLAWMAIL_APPROVAL_REQUEST:<sha256_hmac>:<json_payload>
 ```
 ```json
 {
@@ -64,7 +64,7 @@ APPROVAL_REQUEST:<sha256_hmac>:<json_payload>
 ### Machine B to Machine A (approved - email sent)
 Sent as a Telegram message from @approvalbot to @openclawbot:
 ```
-APPROVED:<sha256_hmac>:<json_payload>
+GLAWMAIL_APPROVED:<sha256_hmac>:<json_payload>
 ```
 ```json
 {
@@ -79,7 +79,7 @@ APPROVED:<sha256_hmac>:<json_payload>
 ### Machine B to Machine A (declined - email discarded)
 Sent as a Telegram message from @approvalbot to @openclawbot:
 ```
-DECLINE:<sha256_hmac>:<json_payload>
+GLAWMAIL_DECLINE:<sha256_hmac>:<json_payload>
 ```
 ```json
 {
@@ -95,7 +95,7 @@ DECLINE:<sha256_hmac>:<json_payload>
 Sent as a Telegram message from @approvalbot to @openclawbot when something goes
 wrong on Machine B, regardless of whether the owner approved or not:
 ```
-ERROR:<sha256_hmac>:<json_payload>
+GLAWMAIL_ERROR:<sha256_hmac>:<json_payload>
 ```
 ```json
 {
@@ -160,7 +160,7 @@ python approval_bot.py
 ```bash
 # Integrate into your AI app:
 from ai_app import start, request_email_approval
-start()  # begins background polling for DECLINE callbacks
+start()  # begins background polling for GLAWMAIL_DECLINE callbacks
 
 # When your AI wants to send an email:
 callback_id = request_email_approval(
