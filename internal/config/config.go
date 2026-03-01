@@ -56,10 +56,9 @@ func Write(path string, values map[string]string) error {
 
 // MachineAConfig holds Machine A configuration.
 type MachineAConfig struct {
-	OwnBotToken       string
-	OwnerChatID       string
-	ApprovalBotChatID string
-	WebhookSecret     string
+	OwnBotToken   string
+	OwnerChatID   string
+	WebhookSecret string
 }
 
 // LoadMachineAConfig loads Machine A configuration from .env.
@@ -69,7 +68,7 @@ func LoadMachineAConfig(envPath string) (*MachineAConfig, error) {
 		return nil, fmt.Errorf("loading .env: %w", err)
 	}
 
-	required := []string{"OWN_BOT_TOKEN", "OWNER_CHAT_ID", "APPROVAL_BOT_CHAT_ID", "WEBHOOK_SECRET"}
+	required := []string{"OWN_BOT_TOKEN", "OWNER_CHAT_ID", "WEBHOOK_SECRET"}
 	var missing []string
 	for _, key := range required {
 		if env[key] == "" {
@@ -81,10 +80,9 @@ func LoadMachineAConfig(envPath string) (*MachineAConfig, error) {
 	}
 
 	return &MachineAConfig{
-		OwnBotToken:       env["OWN_BOT_TOKEN"],
-		OwnerChatID:       env["OWNER_CHAT_ID"],
-		ApprovalBotChatID: env["APPROVAL_BOT_CHAT_ID"],
-		WebhookSecret:     env["WEBHOOK_SECRET"],
+		OwnBotToken:   env["OWN_BOT_TOKEN"],
+		OwnerChatID:   env["OWNER_CHAT_ID"],
+		WebhookSecret: env["WEBHOOK_SECRET"],
 	}, nil
 }
 
@@ -92,7 +90,6 @@ func LoadMachineAConfig(envPath string) (*MachineAConfig, error) {
 type MachineBConfig struct {
 	OwnBotToken          string
 	OwnerChatID          string
-	OpenclawBotChatID    string
 	WebhookSecret        string
 	GmailFrom            string
 	GmailCredentialsFile string
@@ -106,7 +103,7 @@ func LoadMachineBConfig(envPath string) (*MachineBConfig, error) {
 		return nil, fmt.Errorf("loading .env: %w", err)
 	}
 
-	required := []string{"OWN_BOT_TOKEN", "OWNER_CHAT_ID", "OPENCLAW_BOT_CHAT_ID", "WEBHOOK_SECRET", "GMAIL_FROM", "GMAIL_CREDENTIALS_FILE", "GMAIL_TOKEN_FILE"}
+	required := []string{"OWN_BOT_TOKEN", "OWNER_CHAT_ID", "WEBHOOK_SECRET", "GMAIL_FROM", "GMAIL_CREDENTIALS_FILE", "GMAIL_TOKEN_FILE"}
 	var missing []string
 	for _, key := range required {
 		if env[key] == "" {
@@ -120,7 +117,6 @@ func LoadMachineBConfig(envPath string) (*MachineBConfig, error) {
 	return &MachineBConfig{
 		OwnBotToken:          env["OWN_BOT_TOKEN"],
 		OwnerChatID:          env["OWNER_CHAT_ID"],
-		OpenclawBotChatID:    env["OPENCLAW_BOT_CHAT_ID"],
 		WebhookSecret:        env["WEBHOOK_SECRET"],
 		GmailFrom:            env["GMAIL_FROM"],
 		GmailCredentialsFile: env["GMAIL_CREDENTIALS_FILE"],

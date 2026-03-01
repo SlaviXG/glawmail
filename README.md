@@ -1,42 +1,52 @@
-# GlawMail - Email Approval Bot
+# GlawMail - Gmail Sender Bot
 
-Human-in-the-loop email approval system. An AI bot generates emails on Machine A, sends them to Machine B for human approval via Telegram, and Machine B sends approved emails via Gmail.
+Human-in-the-loop email sending via Telegram. Forward a properly formatted message to the bot, and it sends the email via Gmail.
 
-**Zero shared networking** - Telegram is the only transport between machines.
-
-## Architecture
+## How It Works
 
 ```
 ┌─────────────────────┐                    ┌─────────────────────┐
-│     Machine A       │                    │     Machine B       │
-│  (AI Bot Server)    │                    │  (Approval Server)  │
+│  AI / Machine A     │                    │     Machine B       │
+│  (Email Generator)  │                    │   (Gmail Sender)    │
 ├─────────────────────┤                    ├─────────────────────┤
-│                     │   Telegram API     │                     │
-│  AI generates email ├───────────────────►│  Shows preview to   │
-│                     │  APPROVAL_REQUEST  │  owner in Telegram  │
 │                     │                    │                     │
-│                     │◄───────────────────┤  Owner taps         │
-│  Receives callback  │  APPROVED/DECLINE  │  ✅ Send / ❌ Decline │
+│  Generates email    │                    │  Receives message   │
+│  Shows preview      │    Owner forwards  │  Validates HMAC     │
+│  Creates GLAWMAIL   ├───────────────────►│  Sends via Gmail    │
+│  message            │                    │  Reports success    │
 │                     │                    │                     │
-│                     │                    │  If approved:       │
-│                     │                    │  → Gmail API send   │
 └─────────────────────┘                    └─────────────────────┘
+        (optional)                              (required)
 ```
 
-## Security
+**Machine A is optional.** Any AI with the right prompt/skill can generate `GLAWMAIL_SEND` messages directly.
 
-- **HMAC-SHA256 signed messages** - All operational messages are cryptographically signed
-- **One-time pairing** - 6-digit code handshake locks machines together on first run
-- **Isolated credentials** - Machine A has no Gmail access; Machine B has no AI access
-- **No public endpoints** - Both bots poll Telegram, no webhooks needed
+## Message Format
+
+```
+GLAWMAIL_SEND:<hmac>:<json>
+```
+
+Where `<json>` contains:
+```json
+{
+  "to": "recipient@example.com",
+  "subject": "Email subject",
+  "body": "Email body text",
+  "html": false,
+  "metadata": { "optional": "data" }
+}
+```
+
+The HMAC is SHA256 of the JSON payload, using the shared `WEBHOOK_SECRET`.
 
 ## Quick Start
 
 ### Prerequisites
 
 - Go 1.22+
-- Two Telegram bots (create via [@BotFather](https://t.me/BotFather))
-- Gmail API credentials (for Machine B)
+- A Telegram bot (create via [@BotFather](https://t.me/BotFather))
+- Gmail API credentials
 
 ### Installation
 
@@ -46,79 +56,83 @@ cd glawmail
 go mod download
 ```
 
-### Setup Machine A (AI Bot)
-
-```bash
-go run ./setup --machine a
-```
-
-This will prompt for:
-1. Your AI bot token (@openclawbot)
-2. Your Telegram chat ID
-3. Machine B's bot ID
-4. Generate a shared HMAC secret
-
-### Setup Machine B (Approval Bot)
+### Setup Gmail Sender (Machine B)
 
 ```bash
 go run ./setup --machine b
 ```
 
 This will prompt for:
-1. Your approval bot token (@approvalbot)
+1. Your bot token
 2. Your Telegram chat ID
-3. Machine A's bot ID
-4. The shared HMAC secret from Machine A
-5. Gmail OAuth authorization
+3. A shared HMAC secret (generate or paste)
+4. Gmail OAuth authorization
 
 ### Run
 
-**Machine A:**
-```bash
-go run ./cmd/machine_a
-```
-
-**Machine B:**
 ```bash
 go run ./cmd/machine_b
 ```
 
-On first run, both machines will perform a pairing handshake. Machine A sends a 6-digit code to Machine B, you confirm it in Telegram, and they're locked together.
-
 ### Test
 
+If you also set up Machine A (optional):
+
 ```bash
+go run ./setup --machine a
 go run ./cmd/machine_a test
 ```
 
-Sends a test approval request to Machine B.
+This shows an email preview and generates a `GLAWMAIL_SEND` message. Forward it to Machine B's bot to send.
 
 ## Building
 
 ```bash
 # Build for current platform
-go build -o glawmail-a ./cmd/machine_a
-go build -o glawmail-b ./cmd/machine_b
+go build -o glawmail-sender ./cmd/machine_b
+go build -o glawmail-preview ./cmd/machine_a
 go build -o glawmail-setup ./setup
 
-# Cross-compile
-GOOS=linux GOARCH=amd64 go build -o glawmail-a-linux ./cmd/machine_a
-GOOS=darwin GOARCH=arm64 go build -o glawmail-a-mac ./cmd/machine_a
-GOOS=windows GOARCH=amd64 go build -o glawmail-a.exe ./cmd/machine_a
+# Cross-compile for Raspberry Pi
+GOOS=linux GOARCH=arm64 go build -o glawmail-sender-pi ./cmd/machine_b
 ```
+
+## AI Integration
+
+Any AI can generate emails for this system. Example prompt/skill:
+
+```
+When the user asks you to send an email, format it as:
+
+GLAWMAIL_SEND:<hmac>:<json>
+
+Where:
+- <hmac> is HMAC-SHA256 of the JSON using secret "YOUR_WEBHOOK_SECRET"
+- <json> is {"to":"...", "subject":"...", "body":"..."}
+
+Show the user a preview first, then provide the GLAWMAIL_SEND message
+for them to forward to their Gmail bot.
+```
+
+## Security
+
+- **HMAC-SHA256 signed** - Messages without valid signatures are rejected
+- **Human approval** - Owner must manually forward each message
+- **No public endpoints** - Bot polls Telegram, no webhooks needed
+- **Isolated credentials** - Gmail credentials only on Machine B
 
 ## Project Structure
 
 ```
 glawmail/
 ├── cmd/
-│   ├── machine_a/main.go    # AI bot bridge
-│   └── machine_b/main.go    # Approval bot + Gmail sender
+│   ├── machine_a/main.go    # Email preview bot (optional)
+│   └── machine_b/main.go    # Gmail sender bot
 ├── internal/
+│   ├── color/               # Terminal colors
 │   ├── config/              # .env loading
 │   ├── gmail/               # Gmail OAuth + send
 │   ├── hmac/                # Message signing
-│   ├── pairing/             # Pairing protocol
 │   └── telegram/            # Bot API helpers
 ├── setup/main.go            # Interactive setup wizard
 ├── go.mod
@@ -126,87 +140,13 @@ glawmail/
 └── LICENSE
 ```
 
-## Pairing Protocol
-
-On first run, a one-time pairing handshake locks each bot to its counterpart:
-
-```
-Machine A starts                 Machine B starts
-     │                                │
-     │ GLAWMAIL_PAIR_REQUEST:123456   │
-     │───────────────────────────────►│
-     │                                │ Shows code to owner
-     │                                │ Owner types /confirm
-     │                                │
-     │ GLAWMAIL_PAIR_CONFIRM:123456   │
-     │◄───────────────────────────────│
-     │                                │
-  Writes .pairing               Writes .pairing
-  (peer bot ID locked)          (peer bot ID locked)
-```
-
-After pairing:
-- Both bots store the verified peer bot ID in `.pairing` (mode 600)
-- Any GLAWMAIL message from any other sender is silently dropped
-- To re-pair, delete `.pairing` on both machines and restart
-
-## Message Protocol
-
-All messages use the format: `PREFIX:HMAC_SIGNATURE:JSON_PAYLOAD`
-
-| Message | Direction | Purpose |
-|---------|-----------|---------|
-| `GLAWMAIL_PAIR_REQUEST:<code>` | A → B | Initiate pairing |
-| `GLAWMAIL_PAIR_CONFIRM:<code>` | B → A | Confirm pairing |
-| `GLAWMAIL_APPROVAL_REQUEST` | A → B | Request email approval |
-| `GLAWMAIL_APPROVED` | B → A | Email sent successfully |
-| `GLAWMAIL_DECLINE` | B → A | Owner declined the email |
-| `GLAWMAIL_ERROR` | B → A | Error during processing |
-
-### Example: Approval Request (A → B)
-```
-GLAWMAIL_APPROVAL_REQUEST:sha256=abc123...:{json}
-```
-```json
-{
-  "callback_id": "550e8400-...",
-  "to": "james@spotship.com",
-  "subject": "Quick question",
-  "body": "Hi James...",
-  "html": false,
-  "metadata": { "lead_id": "lead_001" }
-}
-```
-
-### Example: Approved (B → A)
-```json
-{
-  "callback_id": "550e8400-...",
-  "to": "james@spotship.com",
-  "subject": "Quick question",
-  "gmail_id": "18f3a2b1c4d5e6f7",
-  "metadata": { "lead_id": "lead_001" }
-}
-```
-
 ## Files
 
-| File | Machine | Purpose |
-|------|---------|---------|
-| `cmd/machine_a/main.go` | A | Sends approval requests, polls for callbacks |
-| `cmd/machine_b/main.go` | B | Telegram UI, Gmail sender, status relay |
-| `setup/main.go` | Both | Interactive first-run setup wizard |
-| `.env` | Both | Generated by setup - **never commit** |
-| `.pairing` | Both | Generated on first run - **never commit** |
-| `token.json` | B only | Gmail OAuth token - **never commit** |
-| `credentials.json` | B only | Google OAuth client - **never commit** |
-
-## Production
-
-- Replace in-memory `pending` map with Redis for persistence
-- Run as systemd services or in Docker
-- File permissions: `chmod 600 .env token.json credentials.json`
-- Rotate `WEBHOOK_SECRET` periodically by re-running setup
+| File | Purpose |
+|------|---------|
+| `.env` | Bot token, chat ID, HMAC secret, Gmail paths |
+| `token.json` | Gmail OAuth token - **never commit** |
+| `credentials.json` | Google OAuth client - **never commit** |
 
 ## License
 

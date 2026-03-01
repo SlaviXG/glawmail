@@ -31,7 +31,7 @@ func pathExample(filename string) string {
 	return fmt.Sprintf("e.g. %s or /home/you/%s", filename, filename)
 }
 
-// ── Input helpers ─────────────────────────────────────────────────────────────
+// -- Input helpers ------------------------------------------------------------
 
 var reader = bufio.NewReader(os.Stdin)
 
@@ -68,7 +68,7 @@ func promptYN(label string, defaultYes bool) bool {
 	return line == "y" || line == "yes"
 }
 
-// ── Validators ────────────────────────────────────────────────────────────────
+// -- Validators ---------------------------------------------------------------
 
 var (
 	botTokenRe = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]{35,}$`)
@@ -76,7 +76,7 @@ var (
 	emailRe    = regexp.MustCompile(`^[^@]+@[^@]+\.[^@]+$`)
 )
 
-// ── Telegram API helpers ──────────────────────────────────────────────────────
+// -- Telegram API helpers -----------------------------------------------------
 
 func tgGetMe(token string) (username string, id int64, err error) {
 	resp, err := http.Get(fmt.Sprintf("https://api.telegram.org/bot%s/getMe", token))
@@ -123,7 +123,7 @@ func tgSendMessage(token, chatID, text string) error {
 	return nil
 }
 
-// ── Secret generation ─────────────────────────────────────────────────────────
+// -- Secret generation --------------------------------------------------------
 
 func generateSecret() string {
 	buf := make([]byte, 32)
@@ -134,12 +134,12 @@ func generateSecret() string {
 	return fmt.Sprintf("%x", buf)
 }
 
-// ── Machine A setup ───────────────────────────────────────────────────────────
+// -- Machine A setup ----------------------------------------------------------
 
 func setupMachineA() {
 	color.Heading("Machine A - OpenClaw AI Bot Setup")
-	fmt.Println("Machine A runs your AI bot. It sends approval requests to Machine B")
-	fmt.Println("and receives callbacks via Telegram. No public endpoint required.")
+	fmt.Println("Machine A runs your AI bot. It sends approval requests to the owner,")
+	fmt.Println("who forwards them to Machine B. Responses come back the same way.")
 	fmt.Println()
 
 	existing := loadExisting()
@@ -155,16 +155,13 @@ func setupMachineA() {
 			continue
 		}
 		color.Info("Verifying with Telegram API...")
-		username, botID, err := tgGetMe(ownToken)
+		username, _, err := tgGetMe(ownToken)
 		if err != nil {
 			color.Err(fmt.Sprintf("Token rejected: %v", err))
 			continue
 		}
 		botUsername = username
 		color.Ok(fmt.Sprintf("Token valid - bot: @%s", botUsername))
-		fmt.Printf("\n  This bot's numeric ID: %s\n\n", color.Bold(fmt.Sprintf("%d", botID)))
-		color.Warn("You will need this number for Machine B's OPENCLAW_BOT_CHAT_ID.")
-		prompt("Press Enter once you have noted the bot ID", " ", false)
 		break
 	}
 
@@ -188,20 +185,8 @@ func setupMachineA() {
 		break
 	}
 
-	// Approval bot chat ID + shared secret
-	color.Heading("Step 3 / 3 - Approval Bot + Shared Secret")
-	color.Info("You need the numeric ID of Machine B's bot (@approvalbot).")
-	color.Info("Run 'glawmail-setup --machine b' first - it prints the bot ID on startup.")
-	var peerChatID string
-	for {
-		peerChatID = prompt("Approval bot numeric ID", existing["APPROVAL_BOT_CHAT_ID"], false)
-		if !chatIDRe.MatchString(peerChatID) {
-			color.Warn("Must be a number.")
-			continue
-		}
-		break
-	}
-
+	// Shared secret
+	color.Heading("Step 3 / 3 - Shared HMAC Secret")
 	webhookSecret := existing["WEBHOOK_SECRET"]
 	if webhookSecret != "" {
 		color.Info("Existing WEBHOOK_SECRET found.")
@@ -217,10 +202,9 @@ func setupMachineA() {
 	prompt("Press Enter once you have noted it", " ", false)
 
 	values := map[string]string{
-		"OWN_BOT_TOKEN":        ownToken,
-		"OWNER_CHAT_ID":        ownerChatID,
-		"APPROVAL_BOT_CHAT_ID": peerChatID,
-		"WEBHOOK_SECRET":       webhookSecret,
+		"OWN_BOT_TOKEN":  ownToken,
+		"OWNER_CHAT_ID":  ownerChatID,
+		"WEBHOOK_SECRET": webhookSecret,
 	}
 	if err := config.Write(".env", values); err != nil {
 		color.Err(fmt.Sprintf("Could not write .env: %v", err))
@@ -231,18 +215,18 @@ func setupMachineA() {
 	fmt.Printf("  %s\n", color.Bold("glawmail-a"))
 }
 
-// ── Machine B setup ───────────────────────────────────────────────────────────
+// -- Machine B setup ----------------------------------------------------------
 
 func setupMachineB() {
 	color.Heading("Machine B - Approval Bot + Gmail Sender Setup")
 	fmt.Println("Machine B runs the Telegram approval bot and sends emails via Gmail.")
-	fmt.Println("It never shares credentials with Machine A.")
+	fmt.Println("The owner forwards approval requests from Machine A and relays responses back.")
 	fmt.Println()
 
 	existing := loadExisting()
 
 	// Own bot token
-	color.Heading("Step 1 / 5 - Approval Bot Token")
+	color.Heading("Step 1 / 4 - Approval Bot Token")
 	color.Info("This must be a DIFFERENT bot from the one on Machine A.")
 	color.Info("Create via @BotFather (/newbot).")
 	var ownToken string
@@ -253,20 +237,17 @@ func setupMachineB() {
 			continue
 		}
 		color.Info("Verifying...")
-		username, botID, err := tgGetMe(ownToken)
+		username, _, err := tgGetMe(ownToken)
 		if err != nil {
 			color.Err(fmt.Sprintf("Token rejected: %v", err))
 			continue
 		}
 		color.Ok(fmt.Sprintf("Token valid - bot: @%s", username))
-		fmt.Printf("\n  This bot's numeric ID: %s\n\n", color.Bold(fmt.Sprintf("%d", botID)))
-		color.Warn("You will need this number for Machine A's APPROVAL_BOT_CHAT_ID.")
-		prompt("Press Enter once you have noted the bot ID", " ", false)
 		break
 	}
 
 	// Owner chat ID
-	color.Heading("Step 2 / 5 - Your Telegram Chat ID")
+	color.Heading("Step 2 / 4 - Your Telegram Chat ID")
 	color.Info("Get your chat ID from @userinfobot.")
 	var ownerChatID string
 	for {
@@ -285,27 +266,13 @@ func setupMachineB() {
 		break
 	}
 
-	// OpenClaw bot chat ID
-	color.Heading("Step 3 / 5 - OpenClaw Bot Chat ID")
-	color.Info("Machine B sends callbacks TO Machine A's bot (@openclawbot).")
-	color.Info("Get @openclawbot's numeric ID by forwarding a message from it to @userinfobot.")
-	var peerChatID string
-	for {
-		peerChatID = prompt("OpenClaw bot numeric ID", existing["OPENCLAW_BOT_CHAT_ID"], false)
-		if !chatIDRe.MatchString(peerChatID) {
-			color.Warn("Must be a number.")
-			continue
-		}
-		break
-	}
-
 	// Shared secret
-	color.Heading("Step 4 / 5 - Shared HMAC Secret")
+	color.Heading("Step 3 / 4 - Shared HMAC Secret")
 	color.Info("Paste the WEBHOOK_SECRET generated on Machine A.")
 	webhookSecret := prompt("WEBHOOK_SECRET", existing["WEBHOOK_SECRET"], true)
 
 	// Gmail
-	color.Heading("Step 5 / 5 - Gmail Account + OAuth")
+	color.Heading("Step 4 / 4 - Gmail Account + OAuth")
 	var gmailFrom string
 	for {
 		gmailFrom = prompt("Gmail address to send from", existing["GMAIL_FROM"], false)
@@ -354,7 +321,6 @@ func setupMachineB() {
 	values := map[string]string{
 		"OWN_BOT_TOKEN":          ownToken,
 		"OWNER_CHAT_ID":          ownerChatID,
-		"OPENCLAW_BOT_CHAT_ID":   peerChatID,
 		"WEBHOOK_SECRET":         webhookSecret,
 		"GMAIL_FROM":             gmailFrom,
 		"GMAIL_CREDENTIALS_FILE": credPath,
@@ -369,7 +335,7 @@ func setupMachineB() {
 	fmt.Printf("  %s\n", color.Bold("glawmail-b"))
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// -- Helpers ------------------------------------------------------------------
 
 func loadExisting() map[string]string {
 	existing := map[string]string{}
@@ -392,7 +358,7 @@ func loadExisting() map[string]string {
 	return existing
 }
 
-// ── Entry point ───────────────────────────────────────────────────────────────
+// -- Entry point --------------------------------------------------------------
 
 func main() {
 	machine := flag.String("machine", "", "Which machine to configure: 'a' or 'b'")
