@@ -20,11 +20,17 @@ cd glawmail
 go run ./setup
 ```
 
-## Install as Service (Linux/Pi)
+## Install as Service
+
+### Linux / Raspberry Pi
 
 ```bash
-# Build and install
+chmod +x glawmail.sh
 ./glawmail.sh install
+
+# Add alias
+echo 'alias glawmail="~/glawmail/glawmail.sh"' >> ~/.bashrc
+source ~/.bashrc
 
 # Manage
 glawmail up       # start
@@ -33,10 +39,21 @@ glawmail status   # check status
 glawmail logs     # view logs
 ```
 
-Add to your shell profile for the `glawmail` command:
-```bash
-echo 'alias glawmail="~/glawmail/glawmail.sh"' >> ~/.bashrc
-source ~/.bashrc
+### Windows
+
+```cmd
+glawmail.bat build
+glawmail.bat install
+
+:: Manage
+glawmail.bat up       :: start
+glawmail.bat down     :: stop
+glawmail.bat status   :: check status
+```
+
+For auto-start on Windows login:
+```cmd
+schtasks /create /tn "GlawMail" /tr "C:\path\to\glawmail.exe" /sc onlogon /rl highest
 ```
 
 ## AI Skill
