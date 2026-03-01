@@ -34,9 +34,6 @@ func prompt(label, defaultVal string, secret bool) string {
 		} else {
 			fmt.Printf("%s: ", color.Bold(label))
 		}
-		if secret {
-			fmt.Print("(input hidden) ")
-		}
 		line, _ := reader.ReadString('\n')
 		line = strings.TrimSpace(line)
 		if line == "" {
