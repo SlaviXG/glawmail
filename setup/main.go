@@ -150,13 +150,16 @@ func setupMachineA() {
 			continue
 		}
 		color.Info("Verifying with Telegram API...")
-		username, _, err := tgGetMe(ownToken)
+		username, botID, err := tgGetMe(ownToken)
 		if err != nil {
 			color.Err(fmt.Sprintf("Token rejected: %v", err))
 			continue
 		}
 		botUsername = username
 		color.Ok(fmt.Sprintf("Token valid - bot: @%s", botUsername))
+		fmt.Printf("\n  This bot's numeric ID: %s\n\n", color.Bold(fmt.Sprintf("%d", botID)))
+		color.Warn("You will need this number for Machine B's OPENCLAW_BOT_CHAT_ID.")
+		prompt("Press Enter once you have noted the bot ID", " ", false)
 		break
 	}
 
