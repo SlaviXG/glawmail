@@ -34,11 +34,6 @@ func LoadEnv(path string) (map[string]string, error) {
 	return env, scanner.Err()
 }
 
-// WriteEnv writes environment variables to a .env file with mode 0600.
-func WriteEnv(path string, values map[string]string) error {
-	return Write(path, values)
-}
-
 // Write writes environment variables to a .env file with mode 0600.
 func Write(path string, values map[string]string) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
@@ -54,53 +49,23 @@ func Write(path string, values map[string]string) error {
 	return nil
 }
 
-// MachineAConfig holds Machine A configuration.
-type MachineAConfig struct {
-	OwnBotToken string
-	OwnerChatID string
-}
-
-// LoadMachineAConfig loads Machine A configuration from .env.
-func LoadMachineAConfig(envPath string) (*MachineAConfig, error) {
-	env, err := LoadEnv(envPath)
-	if err != nil {
-		return nil, fmt.Errorf("loading .env: %w", err)
-	}
-
-	required := []string{"OWN_BOT_TOKEN", "OWNER_CHAT_ID"}
-	var missing []string
-	for _, key := range required {
-		if env[key] == "" {
-			missing = append(missing, key)
-		}
-	}
-	if len(missing) > 0 {
-		return nil, fmt.Errorf("missing env vars: %s", strings.Join(missing, ", "))
-	}
-
-	return &MachineAConfig{
-		OwnBotToken: env["OWN_BOT_TOKEN"],
-		OwnerChatID: env["OWNER_CHAT_ID"],
-	}, nil
-}
-
-// MachineBConfig holds Machine B configuration.
-type MachineBConfig struct {
-	OwnBotToken          string
+// Config holds the bot configuration.
+type Config struct {
+	BotToken             string
 	OwnerChatID          string
 	GmailFrom            string
 	GmailCredentialsFile string
 	GmailTokenFile       string
 }
 
-// LoadMachineBConfig loads Machine B configuration from .env.
-func LoadMachineBConfig(envPath string) (*MachineBConfig, error) {
+// Load loads configuration from .env.
+func Load(envPath string) (*Config, error) {
 	env, err := LoadEnv(envPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading .env: %w", err)
 	}
 
-	required := []string{"OWN_BOT_TOKEN", "OWNER_CHAT_ID", "GMAIL_FROM", "GMAIL_CREDENTIALS_FILE", "GMAIL_TOKEN_FILE"}
+	required := []string{"BOT_TOKEN", "OWNER_CHAT_ID", "GMAIL_FROM", "GMAIL_CREDENTIALS_FILE", "GMAIL_TOKEN_FILE"}
 	var missing []string
 	for _, key := range required {
 		if env[key] == "" {
@@ -111,8 +76,8 @@ func LoadMachineBConfig(envPath string) (*MachineBConfig, error) {
 		return nil, fmt.Errorf("missing env vars: %s", strings.Join(missing, ", "))
 	}
 
-	return &MachineBConfig{
-		OwnBotToken:          env["OWN_BOT_TOKEN"],
+	return &Config{
+		BotToken:             env["BOT_TOKEN"],
 		OwnerChatID:          env["OWNER_CHAT_ID"],
 		GmailFrom:            env["GMAIL_FROM"],
 		GmailCredentialsFile: env["GMAIL_CREDENTIALS_FILE"],

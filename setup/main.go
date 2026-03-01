@@ -1,9 +1,8 @@
-// cmd/setup - GlawMail first-run setup wizard
+// GlawMail Setup Wizard
 //
-// Run this once on each machine before starting the main bot.
+// Run this once before starting the bot:
 //
-//	glawmail-setup --machine a    - configure Machine A (OpenClaw AI bot)
-//	glawmail-setup --machine b    - configure Machine B (Approval bot + Gmail)
+//	go run ./setup
 package main
 
 import (
@@ -30,11 +29,9 @@ func pathExample(filename string) string {
 	return fmt.Sprintf("e.g. %s or /home/you/%s", filename, filename)
 }
 
-// -- Input helpers ------------------------------------------------------------
-
 var reader = bufio.NewReader(os.Stdin)
 
-func prompt(label, defaultVal string, secret bool) string {
+func prompt(label, defaultVal string) string {
 	for {
 		if defaultVal != "" {
 			fmt.Printf("%s [%s]: ", color.Bold(label), defaultVal)
@@ -67,15 +64,11 @@ func promptYN(label string, defaultYes bool) bool {
 	return line == "y" || line == "yes"
 }
 
-// -- Validators ---------------------------------------------------------------
-
 var (
 	botTokenRe = regexp.MustCompile(`^\d+:[A-Za-z0-9_-]{35,}$`)
 	chatIDRe   = regexp.MustCompile(`^-?\d+$`)
 	emailRe    = regexp.MustCompile(`^[^@]+@[^@]+\.[^@]+$`)
 )
-
-// -- Telegram API helpers -----------------------------------------------------
 
 func tgGetMe(token string) (username string, id int64, err error) {
 	resp, err := http.Get(fmt.Sprintf("https://api.telegram.org/bot%s/getMe", token))
@@ -122,28 +115,50 @@ func tgSendMessage(token, chatID, text string) error {
 	return nil
 }
 
-// -- Machine A setup ----------------------------------------------------------
+func loadExisting() map[string]string {
+	existing := map[string]string{}
+	f, err := os.Open(".env")
+	if err != nil {
+		return existing
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if ok {
+			existing[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
+	}
+	return existing
+}
 
-func setupMachineA() {
-	color.Heading("Machine A - Email Preview Bot Setup (Optional)")
-	fmt.Println("Machine A generates email previews in GLAWMAIL format.")
-	fmt.Println("You can skip this if your AI generates GLAWMAIL messages directly.")
+func main() {
+	flag.Parse()
+
+	fmt.Printf("\n%s\n", color.Bold("================================"))
+	fmt.Printf("%s\n", color.Bold("  GlawMail Setup Wizard"))
+	fmt.Printf("%s\n", color.Bold("================================"))
+	fmt.Println("Gmail sender bot for Telegram.")
 	fmt.Println()
 
 	existing := loadExisting()
 
-	// Own bot token
-	color.Heading("Step 1 / 2 - Bot Token")
-	color.Info("Create this bot via @BotFather (/newbot) if you haven't already.")
-	var ownToken, botUsername string
+	// Bot token
+	color.Heading("Step 1 / 3 - Telegram Bot")
+	color.Info("Create a bot via @BotFather (/newbot) if you haven't already.")
+	var botToken, botUsername string
 	for {
-		ownToken = prompt("Bot token", existing["OWN_BOT_TOKEN"], true)
-		if !botTokenRe.MatchString(ownToken) {
+		botToken = prompt("Bot token", existing["BOT_TOKEN"])
+		if !botTokenRe.MatchString(botToken) {
 			color.Warn("Expected format: 123456789:ABCdef...")
 			continue
 		}
-		color.Info("Verifying with Telegram API...")
-		username, _, err := tgGetMe(ownToken)
+		color.Info("Verifying...")
+		username, _, err := tgGetMe(botToken)
 		if err != nil {
 			color.Err(fmt.Sprintf("Token rejected: %v", err))
 			continue
@@ -154,17 +169,17 @@ func setupMachineA() {
 	}
 
 	// Owner chat ID
-	color.Heading("Step 2 / 2 - Your Telegram Chat ID")
+	color.Heading("Step 2 / 3 - Your Telegram Chat ID")
 	color.Info("Get your chat ID from @userinfobot on Telegram.")
 	var ownerChatID string
 	for {
-		ownerChatID = prompt("Your Telegram chat ID", existing["OWNER_CHAT_ID"], false)
+		ownerChatID = prompt("Your Telegram chat ID", existing["OWNER_CHAT_ID"])
 		if !chatIDRe.MatchString(ownerChatID) {
 			color.Warn("Must be a number, e.g. 987654321")
 			continue
 		}
 		color.Info("Sending test message...")
-		if err := tgSendMessage(ownToken, ownerChatID, "GlawMail setup: Preview bot connected!"); err != nil {
+		if err := tgSendMessage(botToken, ownerChatID, "GlawMail setup: Bot connected!"); err != nil {
 			color.Err(fmt.Sprintf("Could not send: %v", err))
 			color.Warn("Make sure you have sent /start to @" + botUsername + " first.")
 			continue
@@ -173,73 +188,11 @@ func setupMachineA() {
 		break
 	}
 
-	values := map[string]string{
-		"OWN_BOT_TOKEN": ownToken,
-		"OWNER_CHAT_ID": ownerChatID,
-	}
-	if err := config.Write(".env", values); err != nil {
-		color.Err(fmt.Sprintf("Could not write .env: %v", err))
-		os.Exit(1)
-	}
-	fmt.Println()
-	color.Ok("Setup complete. Start with:")
-	fmt.Printf("  %s\n", color.Bold("go run ./cmd/machine_a"))
-}
-
-// -- Machine B setup ----------------------------------------------------------
-
-func setupMachineB() {
-	color.Heading("Machine B - Gmail Sender Bot Setup")
-	fmt.Println("Machine B sends emails via Gmail when you forward GLAWMAIL_SEND messages.")
-	fmt.Println()
-
-	existing := loadExisting()
-
-	// Own bot token
-	color.Heading("Step 1 / 3 - Gmail Sender Bot Token")
-	color.Info("Create a bot via @BotFather (/newbot).")
-	var ownToken string
-	for {
-		ownToken = prompt("Approval bot token", existing["OWN_BOT_TOKEN"], true)
-		if !botTokenRe.MatchString(ownToken) {
-			color.Warn("Expected format: 123456789:ABCdef...")
-			continue
-		}
-		color.Info("Verifying...")
-		username, _, err := tgGetMe(ownToken)
-		if err != nil {
-			color.Err(fmt.Sprintf("Token rejected: %v", err))
-			continue
-		}
-		color.Ok(fmt.Sprintf("Token valid - bot: @%s", username))
-		break
-	}
-
-	// Owner chat ID
-	color.Heading("Step 2 / 3 - Your Telegram Chat ID")
-	color.Info("Get your chat ID from @userinfobot.")
-	var ownerChatID string
-	for {
-		ownerChatID = prompt("Your Telegram chat ID", existing["OWNER_CHAT_ID"], false)
-		if !chatIDRe.MatchString(ownerChatID) {
-			color.Warn("Must be a number.")
-			continue
-		}
-		color.Info("Sending test message...")
-		if err := tgSendMessage(ownToken, ownerChatID, "GlawMail setup: Gmail sender bot connected!"); err != nil {
-			color.Err(fmt.Sprintf("Could not send: %v", err))
-			color.Warn("Make sure you have sent /start to the bot first.")
-			continue
-		}
-		color.Ok("Test message sent - check your Telegram!")
-		break
-	}
-
 	// Gmail
-	color.Heading("Step 3 / 3 - Gmail Account + OAuth")
+	color.Heading("Step 3 / 3 - Gmail")
 	var gmailFrom string
 	for {
-		gmailFrom = prompt("Gmail address to send from", existing["GMAIL_FROM"], false)
+		gmailFrom = prompt("Gmail address to send from", existing["GMAIL_FROM"])
 		if !emailRe.MatchString(gmailFrom) {
 			color.Warn("Does not look like a valid email.")
 			continue
@@ -252,14 +205,14 @@ func setupMachineB() {
 			return v
 		}
 		return "credentials.json"
-	}(), false)
+	}())
 	color.Info(pathExample("token.json"))
 	tokenPath := prompt("Path to store Gmail token", func() string {
 		if v := existing["GMAIL_TOKEN_FILE"]; v != "" {
 			return v
 		}
 		return "token.json"
-	}(), false)
+	}())
 
 	_, tokenExists := os.Stat(tokenPath)
 	if os.IsNotExist(tokenExists) || promptYN("Re-run Gmail OAuth flow?", false) {
@@ -283,64 +236,17 @@ func setupMachineB() {
 	}
 
 	values := map[string]string{
-		"OWN_BOT_TOKEN":          ownToken,
-		"OWNER_CHAT_ID":          ownerChatID,
-		"GMAIL_FROM":             gmailFrom,
+		"BOT_TOKEN":             botToken,
+		"OWNER_CHAT_ID":         ownerChatID,
+		"GMAIL_FROM":            gmailFrom,
 		"GMAIL_CREDENTIALS_FILE": credPath,
-		"GMAIL_TOKEN_FILE":       tokenPath,
+		"GMAIL_TOKEN_FILE":      tokenPath,
 	}
 	if err := config.Write(".env", values); err != nil {
 		color.Err(fmt.Sprintf("Could not write .env: %v", err))
 		os.Exit(1)
 	}
 	fmt.Println()
-	color.Ok("Setup complete. Start with:")
-	fmt.Printf("  %s\n", color.Bold("go run ./cmd/machine_b"))
-}
-
-// -- Helpers ------------------------------------------------------------------
-
-func loadExisting() map[string]string {
-	existing := map[string]string{}
-	f, err := os.Open(".env")
-	if err != nil {
-		return existing
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if ok {
-			existing[strings.TrimSpace(k)] = strings.TrimSpace(v)
-		}
-	}
-	return existing
-}
-
-// -- Entry point --------------------------------------------------------------
-
-func main() {
-	machine := flag.String("machine", "", "Which machine to configure: 'a' or 'b'")
-	flag.Parse()
-
-	fmt.Printf("\n%s\n", color.Bold("================================================"))
-	fmt.Printf("%s\n", color.Bold("  GlawMail - First-Run Setup Wizard"))
-	fmt.Printf("%s\n", color.Bold("================================================"))
-	fmt.Println("Secrets are written to .env (mode 0600) and never")
-	fmt.Println("stored in source code or shown after confirmation.")
-	fmt.Println()
-
-	switch strings.ToLower(*machine) {
-	case "a":
-		setupMachineA()
-	case "b":
-		setupMachineB()
-	default:
-		fmt.Fprintln(os.Stderr, "Usage: glawmail-setup --machine <a|b>")
-		os.Exit(1)
-	}
+	color.Ok("Setup complete! Start with:")
+	fmt.Printf("  %s\n", color.Bold("go run ./cmd/glawmail"))
 }

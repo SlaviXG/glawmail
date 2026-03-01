@@ -1,4 +1,4 @@
-// Machine B - Gmail Sender Bot
+// GlawMail - Gmail Sender Bot
 //
 // Receives email messages in a simple human-readable format.
 // If the format is valid, sends via Gmail automatically.
@@ -13,8 +13,8 @@
 //
 // First run:
 //
-//	go run ./setup --machine b
-//	go run ./cmd/machine_b
+//	go run ./setup
+//	go run ./cmd/glawmail
 package main
 
 import (
@@ -32,7 +32,7 @@ import (
 )
 
 var (
-	cfg         *config.MachineBConfig
+	cfg         *config.Config
 	bot         *telegram.Bot
 	gmailSvc    *gmail.Service
 	logger      = log.New(os.Stdout, "", log.LstdFlags)
@@ -41,16 +41,16 @@ var (
 
 func main() {
 	var err error
-	cfg, err = config.LoadMachineBConfig(".env")
+	cfg, err = config.Load(".env")
 	if err != nil {
 		fmt.Println("ERROR:", err)
-		fmt.Println("Run: go run ./setup --machine b")
+		fmt.Println("Run: go run ./setup")
 		os.Exit(1)
 	}
 
 	ownerChatID, _ = strconv.ParseInt(cfg.OwnerChatID, 10, 64)
 
-	bot = telegram.NewBot(cfg.OwnBotToken)
+	bot = telegram.NewBot(cfg.BotToken)
 
 	me, err := bot.GetMe()
 	if err != nil {
@@ -64,8 +64,8 @@ func main() {
 	}
 	logger.Println("Gmail service initialized")
 
-	logger.Println("GlawMail sender ready.")
-	bot.SendMessage(ownerChatID, "GlawMail sender started.\n\nForward emails in this format:\n\nGLAWMAIL\nTo: email@example.com\nSubject: Subject here\nBody:\nYour message...")
+	logger.Println("GlawMail ready.")
+	bot.SendMessage(ownerChatID, "GlawMail started.\n\nForward emails in this format:\n\nGLAWMAIL\nTo: email@example.com\nSubject: Subject here\nBody:\nYour message...")
 
 	logger.Println("Polling Telegram...")
 	pollUpdates()
