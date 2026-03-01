@@ -2,6 +2,7 @@
 .env
 token.json
 credentials.json
+.pairing
 
 # Python
 __pycache__/

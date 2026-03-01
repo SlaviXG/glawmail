@@ -1,16 +1,17 @@
 """
-approval_bot.py - Machine B (Approval Bot + Gmail Sender)
+approval_bot.py - Machine B (Approval Bot / @approvalbot)
 ==========================================================
-Polls its own bot (@approvalbot) for GLAWMAIL_APPROVAL_REQUEST messages from Machine A.
-Shows email previews with ✅ / ❌ buttons to the owner.
-  ✅ → sends email via Gmail API
-  ❌ → sends a signed GLAWMAIL_DECLINE message back to Machine A's bot (@openclawbot)
+Polls its own bot for GLAWMAIL_APPROVAL_REQUEST messages from Machine A.
+Shows email previews with Approve/Decline buttons to the owner.
+  Approve -> sends email via Gmail API, notifies Machine A
+  Decline -> notifies Machine A
+  Error   -> notifies Machine A
 
-No public endpoint required. No direct networking to Machine A.
-Telegram is the only transport between machines.
+No public endpoint required. Telegram is the only transport.
 
-Run setup.py --machine b first, then:
-    python approval_bot.py
+First run:
+  1. python setup.py --machine b
+  2. python approval_bot.py    <- waits for pairing on first start
 """
 
 import base64
@@ -30,6 +31,17 @@ from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+
+from pairing import (
+    PAIR_CODE_TTL_SECONDS,
+    PAIR_REQUEST_PREFIX,
+    generate_pair_code,
+    is_paired,
+    is_trusted_sender,
+    make_pair_confirm,
+    parse_pair_message,
+    record_pairing,
+)
 
 # ── Load config ───────────────────────────────────────────────────────────────
 _env_path = Path(__file__).parent / ".env"
@@ -52,10 +64,10 @@ if _missing:
     print("Run: python setup.py --machine b")
     sys.exit(1)
 
-OWN_BOT_TOKEN        = os.environ["OWN_BOT_TOKEN"]        # @approvalbot token
-OWNER_CHAT_ID        = os.environ["OWNER_CHAT_ID"]        # Your personal chat ID
-OPENCLAW_BOT_CHAT_ID = os.environ["OPENCLAW_BOT_CHAT_ID"] # Machine A's bot user ID
-WEBHOOK_SECRET       = os.environ["WEBHOOK_SECRET"]        # Shared HMAC secret
+OWN_BOT_TOKEN        = os.environ["OWN_BOT_TOKEN"]
+OWNER_CHAT_ID        = os.environ["OWNER_CHAT_ID"]
+OPENCLAW_BOT_CHAT_ID = os.environ["OPENCLAW_BOT_CHAT_ID"]
+WEBHOOK_SECRET       = os.environ["WEBHOOK_SECRET"]
 GMAIL_FROM           = os.environ["GMAIL_FROM"]
 GMAIL_TOKEN_FILE     = os.environ["GMAIL_TOKEN_FILE"]
 
@@ -93,8 +105,11 @@ def _tg(method: str, **kwargs) -> dict:
 
 
 def _send_to_owner(text: str, reply_markup: dict | None = None):
-    """Show an email preview (or status update) to the owner."""
-    payload: dict = {"chat_id": int(OWNER_CHAT_ID), "text": text, "parse_mode": "HTML"}
+    payload: dict = {
+        "chat_id":    int(OWNER_CHAT_ID),
+        "text":       text,
+        "parse_mode": "HTML",
+    }
     if reply_markup:
         payload["reply_markup"] = reply_markup
     _tg("sendMessage", **payload)
@@ -109,14 +124,19 @@ def _edit_owner_message(message_id: int, text: str):
         reply_markup={"inline_keyboard": []})
 
 
+def _send_to_peer(text: str):
+    """Send a status message to Machine A's bot (@openclawbot)."""
+    try:
+        _tg("sendMessage", chat_id=int(OPENCLAW_BOT_CHAT_ID), text=text)
+    except Exception as exc:
+        logger.error("Failed to send message to @openclawbot: %s", exc)
+
+
 def _send_to_openclaw(prefix: str, email_data: dict, extra: dict | None = None):
     """
-    Send a signed status message to Machine A's bot (@openclawbot).
+    Send a signed status message to Machine A's bot.
     Format: <PREFIX>:<hmac_sig>:<json_payload>
-
     Used for GLAWMAIL_APPROVED, GLAWMAIL_DECLINE, and GLAWMAIL_ERROR events.
-    Failures here are logged but never re-raised - the caller should not crash
-    because of a notification delivery problem.
     """
     payload = {
         "callback_id": email_data.get("callback_id"),
@@ -126,19 +146,14 @@ def _send_to_openclaw(prefix: str, email_data: dict, extra: dict | None = None):
         **(extra or {}),
     }
     payload_str = json.dumps(payload)
-    message = f"{prefix}:{_sign(payload_str)}:{payload_str}"
-    try:
-        _tg("sendMessage", chat_id=int(OPENCLAW_BOT_CHAT_ID), text=message)
-        logger.info("%s sent to @openclawbot for callback_id=%s", prefix, payload["callback_id"])
-    except Exception as exc:
-        logger.error("Failed to send %s to @openclawbot for callback_id=%s: %s",
-                     prefix, payload["callback_id"], exc)
+    _send_to_peer(f"{prefix}:{_sign(payload_str)}:{payload_str}")
+    logger.info("%s sent to @openclawbot for callback_id=%s", prefix, payload["callback_id"])
 
 
 def _keyboard(callback_id: str) -> dict:
     return {"inline_keyboard": [[
-        {"text": "✅ Send Email", "callback_data": f"approve:{callback_id}"},
-        {"text": "❌ Decline",    "callback_data": f"decline:{callback_id}"},
+        {"text": "Send Email", "callback_data": f"approve:{callback_id}"},
+        {"text": "Decline",    "callback_data": f"decline:{callback_id}"},
     ]]}
 
 
@@ -172,10 +187,109 @@ def _send_gmail(to: str, subject: str, body: str, html: bool) -> str:
     return result["id"]
 
 
-# ── Process incoming GLAWMAIL_APPROVAL_REQUEST from Machine A ─────────────────────────
+# ── Pairing ───────────────────────────────────────────────────────────────────
+def _run_pairing(offset: int) -> tuple[bool, int]:
+    """
+    Waits for a GLAWMAIL_PAIR_REQUEST from Machine A's bot, then:
+      1. Displays the pairing code to the owner in Telegram
+      2. Waits for the owner to type /confirm
+      3. Sends GLAWMAIL_PAIR_CONFIRM:<code> back to Machine A
+      4. Locks the peer bot ID to .pairing
+
+    Returns (success, new_offset).
+    """
+    deadline = time.time() + PAIR_CODE_TTL_SECONDS
+    pending_code: str | None = None
+    pending_sender: str | None = None
+
+    logger.info("Waiting for GLAWMAIL_PAIR_REQUEST from @openclawbot...")
+    _send_to_owner(
+        "Glawmail approval bot started.\n\n"
+        "Waiting for Machine A to initiate pairing...\n"
+        "Make sure ai_app.py is running on Machine A."
+    )
+
+    while time.time() < deadline:
+        try:
+            resp = requests.get(
+                f"{OWN_API}/getUpdates",
+                params={
+                    "offset":          offset,
+                    "timeout":         10,
+                    "allowed_updates": ["message"],
+                },
+                timeout=15,
+            )
+            resp.raise_for_status()
+            for update in resp.json().get("result", []):
+                offset    = update["update_id"] + 1
+                msg       = update.get("message", {})
+                sender_id = str(msg.get("from", {}).get("id", ""))
+                text      = msg.get("text", "")
+
+                # Step 1 - receive PAIR_REQUEST from Machine A's bot
+                if pending_code is None:
+                    parsed = parse_pair_message(text)
+                    if not parsed:
+                        continue
+                    prefix, code = parsed
+                    if prefix != PAIR_REQUEST_PREFIX:
+                        continue
+                    # Only accept from the configured peer bot
+                    if sender_id != str(OPENCLAW_BOT_CHAT_ID):
+                        logger.warning(
+                            "Pairing request from unexpected sender %s - ignoring", sender_id
+                        )
+                        continue
+                    pending_code   = code
+                    pending_sender = sender_id
+                    logger.info("Received GLAWMAIL_PAIR_REQUEST - code=%s", code)
+                    _send_to_owner(
+                        f"Pairing request received from Machine A.\n\n"
+                        f"Code: <b>{code}</b>\n\n"
+                        f"Type /confirm to approve this pairing, "
+                        f"or /cancel to reject it."
+                    )
+
+                # Step 2 - wait for owner to confirm
+                elif text.strip() == "/confirm":
+                    if str(msg.get("from", {}).get("id", "")) != str(OWNER_CHAT_ID):
+                        continue
+                    # Send confirm back to Machine A's bot
+                    _send_to_peer(make_pair_confirm(pending_code))
+                    record_pairing(pending_sender)
+                    _send_to_owner(
+                        "Pairing complete. "
+                        "Machine B is now linked to Machine A."
+                    )
+                    logger.info(
+                        "Pairing complete - peer locked to bot ID %s", pending_sender
+                    )
+                    return True, offset
+
+                elif text.strip() == "/cancel":
+                    if str(msg.get("from", {}).get("id", "")) != str(OWNER_CHAT_ID):
+                        continue
+                    pending_code   = None
+                    pending_sender = None
+                    _send_to_owner("Pairing cancelled. Waiting for a new request...")
+                    logger.info("Owner cancelled pairing")
+
+        except requests.exceptions.Timeout:
+            pass
+        except Exception as exc:
+            logger.error("Pairing poll error: %s", exc)
+            time.sleep(2)
+
+    logger.error("Pairing timed out.")
+    _send_to_owner("Pairing timed out. Restart both bots to try again.")
+    return False, offset
+
+
+# ── Process incoming GLAWMAIL_APPROVAL_REQUEST from Machine A ─────────────────
 def _process_approval_request(text: str):
     """
-    Parse and verify an GLAWMAIL_APPROVAL_REQUEST message from @openclawbot.
+    Parse and verify a GLAWMAIL_APPROVAL_REQUEST message.
     Format: GLAWMAIL_APPROVAL_REQUEST:<hmac_sig>:<json_payload>
     """
     try:
@@ -197,7 +311,7 @@ def _process_approval_request(text: str):
 
         pending[callback_id] = data
         preview = (
-            f"📧 <b>Email Approval Request</b>\n\n"
+            f"Email Approval Request\n\n"
             f"<b>To:</b> {to}\n"
             f"<b>Subject:</b> {subject}\n\n"
             f"<b>Body:</b>\n{body}\n\n"
@@ -206,7 +320,6 @@ def _process_approval_request(text: str):
         try:
             _send_to_owner(preview, _keyboard(callback_id))
         except Exception as exc:
-            # Could not deliver the preview to the owner via Telegram
             pending.pop(callback_id, None)
             _send_to_openclaw("GLAWMAIL_ERROR", data, extra={
                 "stage":  "telegram_preview",
@@ -222,9 +335,8 @@ def _process_approval_request(text: str):
 
 # ── Process button presses (callback_query) ───────────────────────────────────
 def _process_callback_query(callback_query: dict):
-    # Owner-only enforcement
     from_id = str(callback_query["from"]["id"])
-    if from_id != OWNER_CHAT_ID:
+    if from_id != str(OWNER_CHAT_ID):
         logger.warning("Ignoring callback from non-owner %s", from_id)
         return
 
@@ -232,12 +344,11 @@ def _process_callback_query(callback_query: dict):
     callback_data = callback_query.get("data", "")
     action, _, callback_id = callback_data.partition(":")
 
-    # Ack the button press
     _tg("answerCallbackQuery", callback_query_id=callback_query["id"])
 
     email_data = pending.pop(callback_id, None)
     if not email_data:
-        _edit_owner_message(message_id, "⚠️ Email not found - already processed?")
+        _edit_owner_message(message_id, "Email not found - already processed?")
         return
 
     if action == "approve":
@@ -250,47 +361,58 @@ def _process_callback_query(callback_query: dict):
             )
             _edit_owner_message(
                 message_id,
-                f"✅ Sent to <b>{email_data['to']}</b>\n<i>Gmail ID: {gmail_id}</i>"
+                f"Sent to <b>{email_data['to']}</b>\n<i>Gmail ID: {gmail_id}</i>"
             )
             _send_to_openclaw("GLAWMAIL_APPROVED", email_data, extra={"gmail_id": gmail_id})
             logger.info("Email %s sent to %s", callback_id, email_data["to"])
         except Exception as exc:
             error_msg = str(exc)
-            # Restore pending so the owner can retry from Telegram
             pending[callback_id] = email_data
             _edit_owner_message(
                 message_id,
-                f"❌ Send failed: {error_msg}\n\n<i>Email restored - tap Send to retry.</i>"
+                f"Send failed: {error_msg}\n\n<i>Email restored - tap Send to retry.</i>"
             )
             _tg("editMessageReplyMarkup",
                 chat_id=int(OWNER_CHAT_ID),
                 message_id=message_id,
                 reply_markup=_keyboard(callback_id))
-            # Notify Machine A so it is not left waiting
             _send_to_openclaw("GLAWMAIL_ERROR", email_data, extra={
-                "stage":   "gmail_send",
-                "reason":  error_msg,
+                "stage":  "gmail_send",
+                "reason": error_msg,
             })
             logger.error("Gmail error for %s: %s", callback_id, exc)
 
     elif action == "decline":
         _edit_owner_message(
             message_id,
-            f"🚫 <b>Declined</b> - email to <b>{email_data['to']}</b> discarded.\n"
+            f"Declined - email to <b>{email_data['to']}</b> discarded.\n"
             f"<i>Notifying AI...</i>"
         )
         _send_to_openclaw("GLAWMAIL_DECLINE", email_data, extra={"reason": "declined_by_owner"})
+        logger.info("Email %s declined", callback_id)
 
 
-# ── Main polling loop ─────────────────────────────────────────────────────────
+# ── Main loop ─────────────────────────────────────────────────────────────────
 def run():
     """
-    Long-poll the Telegram Bot API for:
+    Handles pairing on first run, then long-polls for:
       - Messages from @openclawbot (GLAWMAIL_APPROVAL_REQUEST)
       - callback_query events (button presses from the owner)
+
+    Only messages from the locked peer bot ID are processed.
+    All other senders are silently dropped.
     """
     offset = 0
+
+    if not is_paired():
+        logger.info("Not yet paired - waiting for pairing handshake from Machine A...")
+        success, offset = _run_pairing(offset)
+        if not success:
+            logger.error("Pairing failed. Exiting.")
+            sys.exit(1)
+
     logger.info("Approval bot running - polling Telegram...")
+
     while True:
         try:
             resp = requests.get(
@@ -312,15 +434,23 @@ def run():
                     msg       = update["message"]
                     sender_id = str(msg.get("from", {}).get("id", ""))
                     text      = msg.get("text", "")
-                    # Only process messages from Machine A's bot
-                    if sender_id == OPENCLAW_BOT_CHAT_ID and text.startswith("GLAWMAIL_APPROVAL_REQUEST:"):
+
+                    # Only process GLAWMAIL messages from the verified peer bot
+                    if not is_trusted_sender(sender_id):
+                        if text.startswith("GLAWMAIL_"):
+                            logger.warning(
+                                "Dropped GLAWMAIL message from untrusted sender %s", sender_id
+                            )
+                        continue
+
+                    if text.startswith("GLAWMAIL_APPROVAL_REQUEST:"):
                         _process_approval_request(text)
 
                 elif "callback_query" in update:
                     _process_callback_query(update["callback_query"])
 
         except requests.exceptions.Timeout:
-            pass  # Normal for long-polling
+            pass
         except Exception as exc:
             logger.error("Polling error: %s - retrying in 5s", exc)
             time.sleep(5)
