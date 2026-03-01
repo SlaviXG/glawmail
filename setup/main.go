@@ -218,17 +218,15 @@ func setupMachineA() {
 // -- Machine B setup ----------------------------------------------------------
 
 func setupMachineB() {
-	color.Heading("Machine B - Approval Bot + Gmail Sender Setup")
-	fmt.Println("Machine B runs the Telegram approval bot and sends emails via Gmail.")
-	fmt.Println("The owner forwards approval requests from Machine A and relays responses back.")
+	color.Heading("Machine B - Gmail Sender Bot Setup")
+	fmt.Println("Machine B sends emails via Gmail when you forward GLAWMAIL_SEND messages.")
 	fmt.Println()
 
 	existing := loadExisting()
 
 	// Own bot token
-	color.Heading("Step 1 / 4 - Approval Bot Token")
-	color.Info("This must be a DIFFERENT bot from the one on Machine A.")
-	color.Info("Create via @BotFather (/newbot).")
+	color.Heading("Step 1 / 3 - Gmail Sender Bot Token")
+	color.Info("Create a bot via @BotFather (/newbot).")
 	var ownToken string
 	for {
 		ownToken = prompt("Approval bot token", existing["OWN_BOT_TOKEN"], true)
@@ -247,7 +245,7 @@ func setupMachineB() {
 	}
 
 	// Owner chat ID
-	color.Heading("Step 2 / 4 - Your Telegram Chat ID")
+	color.Heading("Step 2 / 3 - Your Telegram Chat ID")
 	color.Info("Get your chat ID from @userinfobot.")
 	var ownerChatID string
 	for {
@@ -257,22 +255,17 @@ func setupMachineB() {
 			continue
 		}
 		color.Info("Sending test message...")
-		if err := tgSendMessage(ownToken, ownerChatID, "GlawMail setup: Approval bot connected successfully!"); err != nil {
+		if err := tgSendMessage(ownToken, ownerChatID, "GlawMail setup: Gmail sender bot connected!"); err != nil {
 			color.Err(fmt.Sprintf("Could not send: %v", err))
-			color.Warn("Make sure you have sent /start to the approval bot first.")
+			color.Warn("Make sure you have sent /start to the bot first.")
 			continue
 		}
 		color.Ok("Test message sent - check your Telegram!")
 		break
 	}
 
-	// Shared secret
-	color.Heading("Step 3 / 4 - Shared HMAC Secret")
-	color.Info("Paste the WEBHOOK_SECRET generated on Machine A.")
-	webhookSecret := prompt("WEBHOOK_SECRET", existing["WEBHOOK_SECRET"], true)
-
 	// Gmail
-	color.Heading("Step 4 / 4 - Gmail Account + OAuth")
+	color.Heading("Step 3 / 3 - Gmail Account + OAuth")
 	var gmailFrom string
 	for {
 		gmailFrom = prompt("Gmail address to send from", existing["GMAIL_FROM"], false)
@@ -318,6 +311,16 @@ func setupMachineB() {
 		color.Ok(fmt.Sprintf("Gmail token saved to %s", tokenPath))
 	}
 
+	// Generate HMAC secret
+	webhookSecret := existing["WEBHOOK_SECRET"]
+	if webhookSecret == "" {
+		webhookSecret = generateSecret()
+	}
+
+	fmt.Printf("\n  WEBHOOK_SECRET: %s\n\n", color.Bold(webhookSecret))
+	color.Warn("Save this secret - you'll need it to generate valid GLAWMAIL_SEND messages.")
+	prompt("Press Enter to continue", " ", false)
+
 	values := map[string]string{
 		"OWN_BOT_TOKEN":          ownToken,
 		"OWNER_CHAT_ID":          ownerChatID,
@@ -331,8 +334,8 @@ func setupMachineB() {
 		os.Exit(1)
 	}
 	fmt.Println()
-	color.Ok("Machine B setup complete. Start with:")
-	fmt.Printf("  %s\n", color.Bold("glawmail-b"))
+	color.Ok("Setup complete. Start with:")
+	fmt.Printf("  %s\n", color.Bold("go run ./cmd/machine_b"))
 }
 
 // -- Helpers ------------------------------------------------------------------
