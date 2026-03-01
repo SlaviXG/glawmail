@@ -307,7 +307,14 @@ func setupMachineB() {
 		}
 		break
 	}
-	credPath := prompt("Path to credentials.json", existing["GMAIL_CREDENTIALS_FILE"], false)
+	color.Info("Example: ./credentials.json or C:\\Users\\You\\credentials.json")
+	credPath := prompt("Path to credentials.json", func() string {
+		if v := existing["GMAIL_CREDENTIALS_FILE"]; v != "" {
+			return v
+		}
+		return "credentials.json"
+	}(), false)
+	color.Info("Example: ./token.json or C:\\Users\\You\\token.json")
 	tokenPath := prompt("Path to store Gmail token", func() string {
 		if v := existing["GMAIL_TOKEN_FILE"]; v != "" {
 			return v
