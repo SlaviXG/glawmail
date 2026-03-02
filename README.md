@@ -30,7 +30,9 @@ The human-in-the-loop design means you see and approve every email before it goe
 
 ### Demo
 
-https://github.com/user-attachments/assets/54e930da-ef43-4b4b-b68c-f1eb80eebc85
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/54e930da-ef43-4b4b-b68c-f1eb80eebc85" width="300" autoplay loop muted playsinline></video>
+</div>
 
 ---
 
