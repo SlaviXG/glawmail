@@ -161,6 +161,31 @@ func setupGlobalAlias() {
 	}
 }
 
+func getUserPath() string {
+	// Query user PATH from registry (not the combined system+user PATH)
+	cmd := exec.Command("reg", "query", "HKCU\\Environment", "/v", "Path")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	// Parse output: "    Path    REG_SZ    value"
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "REG_SZ") || strings.Contains(line, "REG_EXPAND_SZ") {
+			parts := strings.SplitN(line, "REG_", 2)
+			if len(parts) == 2 {
+				// Skip "SZ    " or "EXPAND_SZ    "
+				val := parts[1]
+				idx := strings.Index(val, "    ")
+				if idx != -1 {
+					return strings.TrimSpace(val[idx+4:])
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func setupWindowsAlias(workDir string) {
 	// Create glawmail.cmd in a common location
 	userProfile := os.Getenv("USERPROFILE")
@@ -180,21 +205,30 @@ func setupWindowsAlias(workDir string) {
 		return
 	}
 
-	// Check if bin dir is in PATH
-	pathEnv := os.Getenv("PATH")
-	if !strings.Contains(strings.ToLower(pathEnv), strings.ToLower(binDir)) {
-		// Add to user PATH
-		cmd := exec.Command("setx", "PATH", pathEnv+";"+binDir)
-		if err := cmd.Run(); err != nil {
-			color.Warn(fmt.Sprintf("Created %s but could not add to PATH.", cmdPath))
-			color.Info(fmt.Sprintf("Add %s to your PATH manually, or run:", binDir))
-			fmt.Printf("  setx PATH \"%%PATH%%;%s\"\n", binDir)
-			return
-		}
-		color.Ok("Added 'glawmail' command. Restart your terminal to use it.")
-	} else {
+	// Check if bin dir is already in PATH (check full PATH for existing installs)
+	fullPath := os.Getenv("PATH")
+	if strings.Contains(strings.ToLower(fullPath), strings.ToLower(binDir)) {
 		color.Ok("Added 'glawmail' command.")
+		return
 	}
+
+	// Get user PATH only (not system PATH) to avoid setx 1024 char limit
+	userPath := getUserPath()
+	var newPath string
+	if userPath == "" {
+		newPath = binDir
+	} else {
+		newPath = userPath + ";" + binDir
+	}
+
+	// Add to user PATH
+	cmd := exec.Command("setx", "PATH", newPath)
+	if err := cmd.Run(); err != nil {
+		color.Warn(fmt.Sprintf("Created %s but could not add to PATH.", cmdPath))
+		color.Info(fmt.Sprintf("Add %s to your PATH manually.", binDir))
+		return
+	}
+	color.Ok("Added 'glawmail' command. Restart your terminal to use it.")
 }
 
 func setupUnixAlias(workDir string) {
