@@ -28,9 +28,15 @@ This architecture ensures AI can never send unauthorized emails, even if comprom
 
 The human-in-the-loop design means you see and approve every email before it goes out.
 
-## GLAWMAIL Format
+---
 
-Any AI can generate this format:
+## For AI Agents
+
+See [SKILL.md](SKILL.md) for the full skill specification.
+
+### Format
+
+When asked to send an email, output this format:
 
 ```
 GLAWMAIL
@@ -40,9 +46,35 @@ Body:
 Email body text here...
 ```
 
-Works with ChatGPT, Claude, Gemini, local LLMs, or any AI assistant.
+### Rules
 
-## Setup
+- Start with `GLAWMAIL` on its own line
+- `To:` followed by email address
+- `Subject:` followed by subject line
+- `Body:` followed by the message
+- You cannot send emails directly - user forwards to approve
+
+### Example
+
+User: "Email john@example.com about the project update"
+
+```
+GLAWMAIL
+To: john@example.com
+Subject: Project Update
+Body:
+Hi John,
+
+Here is the latest update on the project.
+
+Best regards
+```
+
+---
+
+## For Humans
+
+### Setup
 
 ```bash
 git clone https://github.com/SlaviXG/glawmail
@@ -55,9 +87,9 @@ The setup wizard guides you through:
 2. Connecting your Gmail via OAuth
 3. Optional global `glawmail` command
 
-## Install as Service
+### Install as Service
 
-### Linux / Raspberry Pi
+#### Linux / Raspberry Pi
 
 ```bash
 chmod +x glawmail.sh
@@ -65,7 +97,7 @@ chmod +x glawmail.sh
 glawmail up
 ```
 
-### Windows (run as Administrator)
+#### Windows (run as Administrator)
 
 ```cmd
 glawmail.bat install
@@ -83,6 +115,8 @@ Auto-starts on system boot.
 | `status` | Check if running |
 | `install` | Build and enable auto-start |
 | `uninstall` | Stop and disable auto-start |
+
+---
 
 ## Use Cases
 
