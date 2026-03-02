@@ -30,7 +30,7 @@ The human-in-the-loop design means you see and approve every email before it goe
 
 ### Demo
 
-<video src="https://github.com/SlaviXG/glawmail/raw/main/demo.mp4" width="300" autoplay loop muted playsinline></video>
+[![GlawMail Demo](https://img.youtube.com/vi/9cg1PhoO2Fg/0.jpg)](https://youtube.com/shorts/9cg1PhoO2Fg)
 
 ---
 
