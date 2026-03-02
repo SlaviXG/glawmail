@@ -30,48 +30,6 @@ The human-in-the-loop design means you see and approve every email before it goe
 
 ---
 
-## For AI Agents
-
-See [SKILL.md](SKILL.md) for the full skill specification.
-
-### Format
-
-When asked to send an email, output this format:
-
-```
-GLAWMAIL
-To: recipient@example.com
-Subject: Email subject
-Body:
-Email body text here...
-```
-
-### Rules
-
-- Start with `GLAWMAIL` on its own line
-- `To:` followed by email address
-- `Subject:` followed by subject line
-- `Body:` followed by the message
-- You cannot send emails directly - user forwards to approve
-
-### Example
-
-User: "Email john@example.com about the project update"
-
-```
-GLAWMAIL
-To: john@example.com
-Subject: Project Update
-Body:
-Hi John,
-
-Here is the latest update on the project.
-
-Best regards
-```
-
----
-
 ## For Humans
 
 ### Setup
@@ -115,6 +73,48 @@ Auto-starts on system boot.
 | `status` | Check if running |
 | `install` | Build and enable auto-start |
 | `uninstall` | Stop and disable auto-start |
+
+---
+
+## For AI Agents
+
+See [SKILL.md](SKILL.md) for the full skill specification.
+
+### Format
+
+When asked to send an email, output this format:
+
+```
+GLAWMAIL
+To: recipient@example.com
+Subject: Email subject
+Body:
+Email body text here...
+```
+
+### Rules
+
+- Start with `GLAWMAIL` on its own line
+- `To:` followed by email address
+- `Subject:` followed by subject line
+- `Body:` followed by the message
+- You cannot send emails directly - user forwards to approve
+
+### Example
+
+User: "Email john@example.com about the project update"
+
+```
+GLAWMAIL
+To: john@example.com
+Subject: Project Update
+Body:
+Hi John,
+
+Here is the latest update on the project.
+
+Best regards
+```
 
 ---
 
