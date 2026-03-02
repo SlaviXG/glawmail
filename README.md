@@ -2,6 +2,8 @@
 
 Human-in-the-loop Gmail approval bot for Telegram. Secure AI email sending with complete separation between AI and Gmail access.
 
+For maximum security, run GlawMail on a separate machine (e.g. Raspberry Pi) from your AI. This ensures complete isolation between AI and Gmail credentials.
+
 ## Why GlawMail?
 
 AI agents need to send emails, but giving AI direct Gmail access is risky. GlawMail solves this:
