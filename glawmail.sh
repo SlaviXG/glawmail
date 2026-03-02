@@ -6,7 +6,7 @@ cd "$SCRIPT_DIR"
 
 case "$1" in
     up|start)
-        sudo systemctl start glawmail
+        sudo systemctl restart glawmail
         echo "GlawMail started"
         ;;
     down|stop)

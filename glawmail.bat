@@ -15,6 +15,7 @@ if "%1"=="status" goto status
 goto usage
 
 :start
+taskkill /IM glawmaild.exe /F >nul 2>&1
 start "GlawMail" /B /D "%GLAWMAIL_DIR%" "%GLAWMAIL_EXE%"
 echo GlawMail started
 goto end
