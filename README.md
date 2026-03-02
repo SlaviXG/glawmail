@@ -28,6 +28,10 @@ This architecture ensures AI can never send unauthorized emails, even if comprom
 
 The human-in-the-loop design means you see and approve every email before it goes out.
 
+### Demo
+
+[![GlawMail Demo](https://img.youtube.com/vi/9cg1PhoO2Fg/maxresdefault.jpg)](https://youtube.com/shorts/9cg1PhoO2Fg)
+
 ---
 
 ## For Humans
