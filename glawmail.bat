@@ -2,7 +2,7 @@
 setlocal
 
 set GLAWMAIL_DIR=%~dp0
-set GLAWMAIL_EXE=%GLAWMAIL_DIR%glawmail.exe
+set GLAWMAIL_EXE=%GLAWMAIL_DIR%glawmaild.exe
 
 if "%1"=="up" goto start
 if "%1"=="start" goto start
@@ -20,12 +20,12 @@ echo GlawMail started
 goto end
 
 :stop
-taskkill /IM glawmail.exe /F >nul 2>&1
+taskkill /IM glawmaild.exe /F >nul 2>&1
 echo GlawMail stopped
 goto end
 
 :status
-tasklist /FI "IMAGENAME eq glawmail.exe" | find "glawmail.exe" >nul
+tasklist /FI "IMAGENAME eq glawmaild.exe" | find "glawmaild.exe" >nul
 if %errorlevel%==0 (
     echo GlawMail is running
 ) else (
@@ -58,7 +58,7 @@ goto end
 
 :uninstall
 echo Stopping...
-taskkill /IM glawmail.exe /F >nul 2>&1
+taskkill /IM glawmaild.exe /F >nul 2>&1
 echo Removing auto-start...
 schtasks /delete /tn "GlawMail" /f >nul 2>&1
 echo Uninstalled

@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/glawmail
-ExecStart=/home/pi/glawmail/glawmail
+ExecStart=/home/pi/glawmail/glawmaild
 Restart=always
 RestartSec=5
 

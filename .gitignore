@@ -5,5 +5,7 @@ credentials.json
 .pairing
 
 # Go binaries
+glawmaild
+glawmaild.exe
 glawmail-*
 *.exe

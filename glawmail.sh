@@ -25,7 +25,7 @@ case "$1" in
         ;;
     install)
         echo "Building..."
-        go build -o glawmail ./cmd/glawmail
+        go build -o glawmaild ./cmd/glawmail
 
         echo "Installing service..."
 
