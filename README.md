@@ -99,6 +99,7 @@ Email body text here...
 - `Subject:` followed by subject line
 - `Body:` followed by the message
 - You cannot send emails directly - user forwards to approve
+- For multiple emails, send each as a separate message
 
 ### Example
 

@@ -28,6 +28,7 @@ Your email body here...
 - `Subject:` followed by subject line
 - `Body:` followed by the message (can be multiline)
 - User forwards your message to GlawMail bot to send
+- For multiple emails, send each GLAWMAIL block as a separate message
 
 ## Triggers
 
@@ -53,6 +54,30 @@ Just a reminder about our meeting tomorrow.
 
 Best regards
 ```
+
+## Multiple Emails
+
+When asked to send multiple emails, output each as a separate message:
+
+Message 1:
+```
+GLAWMAIL
+To: alice@example.com
+Subject: Meeting
+Body:
+Hi Alice, ...
+```
+
+Message 2:
+```
+GLAWMAIL
+To: bob@example.com
+Subject: Meeting
+Body:
+Hi Bob, ...
+```
+
+This allows the user to approve each email individually.
 
 ## Security
 
