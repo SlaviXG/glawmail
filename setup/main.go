@@ -77,7 +77,11 @@ func tgGetMe(token string) (username string, id int64, err error) {
 	if err != nil {
 		return "", 0, err
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
 	body, _ := io.ReadAll(resp.Body)
 	var result struct {
 		OK     bool `json:"ok"`
@@ -87,7 +91,11 @@ func tgGetMe(token string) (username string, id int64, err error) {
 		} `json:"result"`
 		Description string `json:"description"`
 	}
-	json.Unmarshal(body, &result)
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to unmarshal body into result,%v", err)
+	}
+
 	if !result.OK {
 		return "", 0, fmt.Errorf("%s", result.Description)
 	}
@@ -104,13 +112,20 @@ func tgSendMessage(token, chatID, text string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
 	var result struct {
 		OK          bool   `json:"ok"`
 		Description string `json:"description"`
 	}
 	raw, _ := io.ReadAll(resp.Body)
-	json.Unmarshal(raw, &result)
+	err = json.Unmarshal(raw, &result)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal raw into result, %v", err)
+	}
+
 	if !result.OK {
 		return fmt.Errorf("%s", result.Description)
 	}
@@ -123,7 +138,9 @@ func loadExisting() map[string]string {
 	if err != nil {
 		return existing
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -246,7 +263,12 @@ func setupUnixAlias(workDir string) {
 	}
 
 	// Check if alias already exists
-	content, _ := os.ReadFile(rcFile)
+	content, err := os.ReadFile(rcFile)
+	if err != nil {
+		color.Err(fmt.Sprintf("Could not read %s: %v", rcFile, err))
+		return
+	}
+
 	if strings.Contains(string(content), "alias glawmail=") {
 		color.Info("Alias already exists in " + rcFile)
 		return
@@ -258,7 +280,9 @@ func setupUnixAlias(workDir string) {
 		color.Err(fmt.Sprintf("Could not open %s: %v", rcFile, err))
 		return
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	if _, err := f.WriteString(aliasLine); err != nil {
 		color.Err(fmt.Sprintf("Could not write to %s: %v", rcFile, err))
@@ -350,7 +374,9 @@ func main() {
 	_, tokenExists := os.Stat(tokenPath)
 	if os.IsNotExist(tokenExists) || promptYN("Re-run Gmail OAuth flow?", false) {
 		if _, err := os.Stat(credPath); os.IsNotExist(err) {
-			color.Err(fmt.Sprintf("%s not found. Download it from Google Cloud Console first.", credPath))
+			color.Err(
+				fmt.Sprintf("%s not found. Download it from Google Cloud Console first.", credPath),
+			)
 			os.Exit(1)
 		}
 		color.Info("If you haven't set up Google Cloud yet:")
