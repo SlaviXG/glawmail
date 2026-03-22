@@ -106,7 +106,9 @@ func (s *Service) SendEmail(to, subject, body string, html bool) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("sending request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	respBody, _ := io.ReadAll(resp.Body)
 
@@ -133,7 +135,10 @@ func RunOAuthFlow(credentialsFile, tokenFile string) error {
 
 	config, err := google.ConfigFromJSON(credData, scopes...)
 	if err != nil {
-		return fmt.Errorf("parsing credentials (make sure you created a 'Desktop app' OAuth client, not 'Web application'): %w", err)
+		return fmt.Errorf(
+			"parsing credentials (make sure you created a 'Desktop app' OAuth client, not 'Web application'): %w",
+			err,
+		)
 	}
 
 	// Find an available port
@@ -142,7 +147,7 @@ func RunOAuthFlow(credentialsFile, tokenFile string) error {
 		return fmt.Errorf("finding port: %w", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
+	_ = listener.Close()
 
 	config.RedirectURL = fmt.Sprintf("http://127.0.0.1:%d", port)
 
@@ -159,7 +164,7 @@ func RunOAuthFlow(credentialsFile, tokenFile string) error {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, "<h1>Authorization successful!</h1><p>You can close this window.</p>")
+		_, _ = fmt.Fprintf(w, "<h1>Authorization successful!</h1><p>You can close this window.</p>")
 		codeChan <- code
 	})
 
@@ -183,14 +188,14 @@ func RunOAuthFlow(credentialsFile, tokenFile string) error {
 	select {
 	case code = <-codeChan:
 	case err := <-errChan:
-		server.Close()
+		_ = server.Close()
 		return err
 	case <-time.After(5 * time.Minute):
-		server.Close()
+		_ = server.Close()
 		return fmt.Errorf("timeout waiting for authorization")
 	}
 
-	server.Close()
+	_ = server.Close()
 
 	// Exchange code for token
 	token, err := config.Exchange(context.Background(), code)

@@ -1,0 +1,25 @@
+version: "2"
+
+issues:
+  max-same-issues: 50
+
+formatters:
+  enable:
+    - goimports
+    - golines
+    - gofmt
+    - swaggo
+
+  settings:
+    golines:
+      max-len: 100 
+
+linters:
+  enable:
+    - errcheck
+    - godoclint
+    - govet
+    - ineffassign
+    - unparam
+    - unused
+

@@ -43,9 +43,8 @@ func main() {
 	var err error
 	cfg, err = config.Load(".env")
 	if err != nil {
-		fmt.Println("ERROR:", err)
-		fmt.Println("Run: go run ./setup")
-		os.Exit(1)
+		logger.Println("Run: go run ./setup")
+		logger.Fatalf("ERROR: %v", err)
 	}
 
 	ownerChatID, _ = strconv.ParseInt(cfg.OwnerChatID, 10, 64)
@@ -65,7 +64,14 @@ func main() {
 	logger.Println("Gmail service initialized")
 
 	logger.Println("GlawMail ready.")
-	bot.SendMessage(ownerChatID, "GlawMail started.\n\nForward emails in this format:\n\nGLAWMAIL\nTo: email@example.com\nSubject: Subject here\nBody:\nYour message...")
+
+	_, err = bot.SendMessage(
+		ownerChatID,
+		"GlawMail started.\n\nForward emails in this format:\n\nGLAWMAIL\nTo: email@example.com\nSubject: Subject here\nBody:\nYour message...",
+	)
+	if err != nil {
+		logger.Printf("WARNING: failed to send init message to %d, %v", ownerChatID, err)
+	}
 
 	logger.Println("Polling Telegram...")
 	pollUpdates()
@@ -103,7 +109,11 @@ func handleMessage(msg *telegram.Message) {
 
 	email, err := parseEmail(text)
 	if err != nil {
-		bot.SendMessage(ownerChatID, fmt.Sprintf("❌ %v", err))
+		_, err = bot.SendMessage(ownerChatID, fmt.Sprintf("❌ %v", err))
+		if err != nil {
+			logger.Printf("WARNING: failed to send error message to %d, %v", ownerChatID, err)
+		}
+
 		logger.Printf("Parse error: %v", err)
 		return
 	}
@@ -111,13 +121,21 @@ func handleMessage(msg *telegram.Message) {
 	// Send email
 	gmailID, err := gmailSvc.SendEmail(email.To, email.Subject, email.Body, false)
 	if err != nil {
-		bot.SendMessage(ownerChatID, fmt.Sprintf("❌ Gmail: %v", err))
+		_, err = bot.SendMessage(ownerChatID, fmt.Sprintf("❌ Gmail: %v", err))
+		if err != nil {
+			logger.Printf("WARNING: failed to send error message to %d, %v", ownerChatID, err)
+		}
+
 		logger.Printf("Gmail send error: %v", err)
 		return
 	}
 
 	// Success
-	bot.SendMessage(ownerChatID, fmt.Sprintf("✅ Sent to %s", email.To))
+	_, err = bot.SendMessage(ownerChatID, fmt.Sprintf("✅ Sent to %s", email.To))
+	if err != nil {
+		logger.Printf("WARNING: failed to send 'sent' message to %d, %v", ownerChatID, err)
+	}
+
 	logger.Printf("Email sent to %s (gmail_id=%s)", email.To, gmailID)
 }
 

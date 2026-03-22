@@ -86,7 +86,7 @@ type InlineKeyboardMarkup struct {
 }
 
 // call makes a POST request to the Telegram API.
-func (b *Bot) call(method string, params map[string]interface{}) (*APIResponse, error) {
+func (b *Bot) call(method string, params map[string]any) (*APIResponse, error) {
 	url := apiBase + b.Token + "/" + method
 	body, err := json.Marshal(params)
 	if err != nil {
@@ -103,7 +103,9 @@ func (b *Bot) call(method string, params map[string]interface{}) (*APIResponse, 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -139,8 +141,12 @@ func (b *Bot) SendMessage(chatID int64, text string) (*Message, error) {
 }
 
 // SendMessageWithMarkup sends a message with optional parse mode and reply markup.
-func (b *Bot) SendMessageWithMarkup(chatID int64, text, parseMode string, replyMarkup *InlineKeyboardMarkup) (*Message, error) {
-	params := map[string]interface{}{
+func (b *Bot) SendMessageWithMarkup(
+	chatID int64,
+	text, parseMode string,
+	replyMarkup *InlineKeyboardMarkup,
+) (*Message, error) {
+	params := map[string]any{
 		"chat_id": chatID,
 		"text":    text,
 	}
@@ -167,7 +173,7 @@ func (b *Bot) SendMessageWithMarkup(chatID int64, text, parseMode string, replyM
 
 // EditMessageText edits the text of a message.
 func (b *Bot) EditMessageText(chatID, messageID int64, text, parseMode string) error {
-	params := map[string]interface{}{
+	params := map[string]any{
 		"chat_id":      chatID,
 		"message_id":   messageID,
 		"text":         text,
@@ -188,7 +194,7 @@ func (b *Bot) EditMessageText(chatID, messageID int64, text, parseMode string) e
 
 // EditMessageReplyMarkup edits the reply markup of a message.
 func (b *Bot) EditMessageReplyMarkup(chatID, messageID int64, markup *InlineKeyboardMarkup) error {
-	params := map[string]interface{}{
+	params := map[string]any{
 		"chat_id":      chatID,
 		"message_id":   messageID,
 		"reply_markup": markup,
@@ -205,7 +211,7 @@ func (b *Bot) EditMessageReplyMarkup(chatID, messageID int64, markup *InlineKeyb
 
 // AnswerCallbackQuery acknowledges a callback query.
 func (b *Bot) AnswerCallbackQuery(queryID string) error {
-	resp, err := b.call("answerCallbackQuery", map[string]interface{}{
+	resp, err := b.call("answerCallbackQuery", map[string]any{
 		"callback_query_id": queryID,
 	})
 	if err != nil {
@@ -237,7 +243,10 @@ func (b *Bot) GetUpdates(offset int64, timeout int, allowedUpdates []string) ([]
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
